@@ -159,11 +159,11 @@ class CiTests(ReviewCase):
         self.assertNotIn("ci", self.state(tid))
         self.assertIsNone(self.failures(tid))
 
-    def test_fifth_failure_by_red_ci_blocks_the_task(self):
+    def test_third_failure_by_red_ci_blocks_the_task(self):
         tid = self.in_review()
-        self.seed_failures(tid, 4)
+        self.seed_failures(tid, 2)
         self.s.ci(tid, "red")
-        self.assertEqual(self.failures(tid), 5)
+        self.assertEqual(self.failures(tid), 0)
         t = self.get(tid)
         self.assertEqual(t["status"], "todo")
         self.assertIn("blocked", t["domains"])
@@ -171,14 +171,14 @@ class CiTests(ReviewCase):
         blocker = self.blocker()
         self.assertIn("to-admin", blocker["domains"])
         self.assertIn(tid, blocker["text"])
-        self.assertIn("5 невдач: CI red", blocker["text"])
+        self.assertIn("3 невдач: CI red", blocker["text"])
         self.assertIn("CI red", self.elf_section(tid))
 
-    def test_fourth_failure_by_red_ci_does_not_block(self):
+    def test_second_failure_by_red_ci_does_not_block(self):
         tid = self.in_review()
-        self.seed_failures(tid, 3)
+        self.seed_failures(tid, 1)
         self.s.ci(tid, "red")
-        self.assertEqual(self.failures(tid), 4)
+        self.assertEqual(self.failures(tid), 2)
         self.assertEqual(self.s.list_tasks(status="blockers"), [])
         self.assertNotIn("blocked", self.get(tid)["domains"])
 
@@ -286,24 +286,24 @@ class ReturnTests(ReviewCase):
         self.assertEqual(self.review_ids("claude"), [tid])
         self.assertEqual(self.s.review_next("claude")[0]["pr"], PR2)
 
-    def test_fifth_failure_by_return_blocks_the_task(self):
+    def test_third_failure_by_return_blocks_the_task(self):
         tid = self.in_review(green=True)
-        self.seed_failures(tid, 4)
+        self.seed_failures(tid, 2)
         self.s.send_back(tid, "знову не те", "claude")
-        self.assertEqual(self.failures(tid), 5)
+        self.assertEqual(self.failures(tid), 0)
         t = self.get(tid)
         self.assertIn("blocked", t["domains"])
         self.assertNotIn("to-agent", t["domains"])
         blocker = self.blocker()
         self.assertIn("to-admin", blocker["domains"])
         self.assertIn(tid, blocker["text"])
-        self.assertIn("5 невдач: знову не те", blocker["text"])
+        self.assertIn("3 невдач: знову не те", blocker["text"])
 
-    def test_fourth_failure_by_return_does_not_block(self):
+    def test_second_failure_by_return_does_not_block(self):
         tid = self.in_review()
-        self.seed_failures(tid, 3)
+        self.seed_failures(tid, 1)
         self.s.send_back(tid, "правки", "claude")
-        self.assertEqual(self.failures(tid), 4)
+        self.assertEqual(self.failures(tid), 2)
         self.assertEqual(self.s.list_tasks(status="blockers"), [])
 
     def test_return_requires_a_comment_and_a_known_agent(self):
@@ -416,15 +416,15 @@ class ReviewToolsTests(ServerCase):
         self.assertIn("перейменуй функцію", got)
         self.assertEqual(self.call("elf_review_next", agent="claude"), "nothing to review")
 
-    def test_fifth_failure_reports_the_block(self):
+    def test_third_failure_reports_the_block(self):
         tid = self.reviewing()
         (self.root / "elf-state.json").write_text(
-            json.dumps({tid: {"failures": 4}}), encoding="utf-8"
+            json.dumps({tid: {"failures": 2}}), encoding="utf-8"
         )
         out = self.call("elf_return", id=tid, comment="знову", agent="claude")
         self.assertIn("Заблоковано", out)
         blocker_id = self.call("list_tasks", status="blockers").split("`")[1]
-        self.assertIn("5 невдач: знову", self.call("get_task", id=blocker_id))
+        self.assertIn("3 невдач: знову", self.call("get_task", id=blocker_id))
 
     def test_unknown_agent_and_empty_comment_are_errors(self):
         tid = self.reviewing()

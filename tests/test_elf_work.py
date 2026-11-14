@@ -259,25 +259,25 @@ class ReleaseTests(ElfCase):
             self.plan(tid), f"## Elf\n- {TODAY} release (claude): рядок 1 рядок 2\n"
         )
 
-    def test_fifth_failure_blocks_automatically(self):
+    def test_third_failure_blocks_automatically(self):
         tid = self.claimed_task()
-        self.seed_failures(tid, 4)
+        self.seed_failures(tid, 2)
         res = self.s.release(tid, "знову впало", "claude")
-        self.assertEqual(self.failures(tid), 5)
+        self.assertEqual(self.failures(tid), 0)  # блок скидає лічильник (Влад 2026-11-14)
         domains = self.get(tid)["domains"]
         self.assertIn("blocked", domains)
         self.assertNotIn("to-agent", domains)
         blockers = self.s.list_tasks(status="blockers")
         self.assertEqual(len(blockers), 1)
-        self.assertIn("5 невдач: знову впало", blockers[0]["text"])
+        self.assertIn("3 невдач: знову впало", blockers[0]["text"])
         self.assertEqual((res["blocker"] or {}).get("id"), blockers[0]["id"])
-        self.assertIn(f"- {TODAY} block (claude): 5 невдач: знову впало", self.plan(tid) or "")
+        self.assertIn(f"- {TODAY} block (claude): 3 невдач: знову впало", self.plan(tid) or "")
 
-    def test_fourth_failure_does_not_block(self):
+    def test_second_failure_does_not_block(self):
         tid = self.claimed_task()
-        self.seed_failures(tid, 3)
+        self.seed_failures(tid, 1)
         res = self.s.release(tid, "ще раз", "claude")
-        self.assertEqual(self.failures(tid), 4)
+        self.assertEqual(self.failures(tid), 2)
         self.assertIsNone(res.get("blocker", "відсутній"))
         self.assertEqual(self.s.list_tasks(status="blockers"), [])
         self.assertIn("to-agent", self.get(tid)["domains"])
@@ -371,6 +371,45 @@ class BlockTests(ElfCase):
         created = self.history_of(self.blocker()["id"], "elf_block")
         self.assertEqual([r["op"] for r in created], ["add"])
 
+    def test_explicit_block_resets_the_failure_counter(self):
+        tid = self.claimed_task()
+        self.seed_failures(tid, 2)
+        self.s.block(tid, "потрібен ключ", "claude")
+        self.assertEqual(self.failures(tid), 0)
+
+    def test_automatic_block_on_third_failure_resets_the_failure_counter(self):
+        tid = self.claimed_task()
+        self.seed_failures(tid, 2)
+        self.s.release(tid, "знову впало", "claude")
+        self.assertEqual(len(self.s.list_tasks(status="blockers")), 1)
+        self.assertEqual(self.failures(tid), 0)
+
+    def test_after_explicit_block_and_unblock_the_next_release_counts_one(self):
+        tid = self.claimed_task()
+        self.seed_failures(tid, 2)
+        self.s.block(tid, "потрібен ключ", "claude")
+        self.unblock_and_claim(tid)
+        res = self.s.release(tid, "ще раз", "claude")
+        self.assertEqual(self.failures(tid), 1)
+        self.assertIsNone(res.get("blocker", "відсутній"))
+        self.assertEqual(len(self.s.list_tasks(status="blockers")), 1)
+        self.assertIn("to-agent", self.get(tid)["domains"])
+
+    def test_after_automatic_block_and_unblock_the_next_release_counts_one(self):
+        tid = self.claimed_task()
+        self.seed_failures(tid, 2)
+        self.s.release(tid, "знову впало", "claude")
+        self.unblock_and_claim(tid)
+        res = self.s.release(tid, "ще раз", "claude")
+        self.assertEqual(self.failures(tid), 1)
+        self.assertIsNone(res.get("blocker", "відсутній"))
+        self.assertEqual(len(self.s.list_tasks(status="blockers")), 1)
+
+    def unblock_and_claim(self, tid: str) -> None:
+        """Людина повертає задачу в чергу: +to-agent, −blocked; агент знову її бере."""
+        self.s.edit_task(tid, domains=["to-agent", "claude", "dev"])
+        self.assertEqual(self.claimed("claude")["id"], tid)
+
     def test_block_returns_both_tasks(self):
         tid = self.claimed_task()
         res = self.s.block(tid, "причина", "claude")
@@ -440,16 +479,16 @@ class ElfToolsTests(ServerCase):
         self.assertIn("[to do]", self.call("get_task", id=tid))
         self.assertIn("нема мережі", self.call("get_task", id=tid))
 
-    def test_fifth_release_reports_the_block(self):
+    def test_third_release_reports_the_block(self):
         tid = self.todo("Задача")
         self.call("elf_claim", agent="claude")
         (self.root / "elf-state.json").write_text(
-            json.dumps({tid: {"failures": 4}}), encoding="utf-8"
+            json.dumps({tid: {"failures": 2}}), encoding="utf-8"
         )
         out = self.call("elf_release", id=tid, reason="знову", agent="claude")
         self.assertIn("Заблоковано", out)
         blocker_id = self.call("list_tasks", status="blockers").split("`")[1]
-        self.assertIn("5 невдач: знову", self.call("get_task", id=blocker_id))
+        self.assertIn("3 невдач: знову", self.call("get_task", id=blocker_id))
 
     def test_block_reports_the_blocker_id(self):
         tid = self.todo("Задача")
