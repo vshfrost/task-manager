@@ -545,6 +545,18 @@ def delete_task(id: str) -> str:
     return "🗑️ Видалено:\n" + _fmt(t)
 
 
+@mcp.tool(annotations=_WRITE, structured_output=False)
+def create_project(slug: str, name: str, repo: str = "") -> str:
+    """Заглушка."""
+    return ""
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False), structured_output=False)
+def list_projects() -> str:
+    """Заглушка."""
+    return ""
+
+
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False), structured_output=False)
 def history(id: str = "", limit: int = 20) -> str:
     """Журнал змін задач: хто, коли і ЩО САМЕ змінив. Найновіші — зверху.

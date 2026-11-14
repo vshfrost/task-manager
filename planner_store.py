@@ -621,6 +621,13 @@ class PlannerStore:
             os.replace(tmp, path)
         return colors
 
+    # --- Реєстр проєктів (заглушки: реалізація — у наступному коміті) ---------
+    def create_project(self, slug: str, name: str, repo: str = "") -> dict:
+        return {"slug": "", "name": "", "repo": ""}
+
+    def list_projects(self) -> list[dict]:
+        return []
+
     def templates(self, project: str | None = None) -> list[dict]:
         """Шаблони задач із `projects/<слаг>/template.md` (по файлу на проєкт).
 
