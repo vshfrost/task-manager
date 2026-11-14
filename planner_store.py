@@ -665,10 +665,10 @@ class PlannerStore:
         return None
 
     def release(self, task_id: str, reason: str, agent: str) -> dict:
-        return {}
+        return {"task": {}, "failures": 0, "blocker": None}
 
     def block(self, task_id: str, reason: str, agent: str) -> dict:
-        return {}
+        return {"task": {}, "failures": 0, "blocker": None}
 
     # --- helpers -------------------------------------------------------------
     def _logged_edit(self, before: dict, task: Task, plan: str | None) -> dict:

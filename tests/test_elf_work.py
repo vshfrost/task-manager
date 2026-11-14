@@ -48,8 +48,21 @@ class ElfCase(unittest.TestCase):
     def get(self, tid: str) -> dict:
         return self.s.get_task(tid)
 
-    def state(self) -> dict:
-        return json.loads((self.root / "elf-state.json").read_text(encoding="utf-8"))
+    def failures(self, tid: str) -> int | None:
+        """Лічильник невдач із побічного файлу; None — запису нема."""
+        path = self.root / "elf-state.json"
+        if not path.exists():
+            return None
+        return json.loads(path.read_text(encoding="utf-8")).get(tid, {}).get("failures")
+
+    def blocker(self) -> dict:
+        """Єдина задача в blockers."""
+        blockers = self.s.list_tasks(status="blockers")
+        self.assertEqual(len(blockers), 1)
+        return blockers[0]
+
+    def plan(self, tid: str) -> str | None:
+        return self.get(tid).get("plan")
 
     def seed_failures(self, tid: str, n: int) -> None:
         (self.root / "elf-state.json").write_text(
@@ -164,6 +177,132 @@ class ClaimTests(ElfCase):
         with self.assertRaises(PlannerError):
             self.s.claim("gemini")
         self.assertEqual(self.get(t)["status"], "todo")
+
+
+class ReleaseTests(ElfCase):
+    def claimed_task(self, name="Задача", tags=("to-agent", "claude"), **kw) -> str:
+        return self.task(name, tags, status="in_progress", **kw)
+
+    def test_release_puts_task_first_in_todo(self):
+        a, b, c = (self.task(n, ("to-agent", "claude")) for n in "ABC")
+        self.s.move_task(a, "in_progress")
+        self.s.move_task(b, "in_progress")
+        self.assertEqual(self.ids("todo"), [c])
+        self.s.release(b, "помилка", "claude")
+        self.assertEqual(self.ids("todo"), [b, c])
+        self.s.release(a, "помилка", "claude")
+        self.assertEqual(self.ids("todo"), [a, b, c])
+        self.assertEqual(self.get(a)["status"], "todo")
+
+    def test_release_adds_one_failure_each_time(self):
+        tid = self.claimed_task()
+        self.s.release(tid, "перша", "claude")
+        self.assertEqual(self.failures(tid), 1)
+        self.s.move_task(tid, "in_progress")
+        self.s.release(tid, "друга", "claude")
+        self.assertEqual(self.failures(tid), 2)
+
+    def test_release_leaves_task_tags_and_line_unchanged(self):
+        tid = self.claimed_task(tags=("to-agent", "claude", "dev"))
+        before = self.get(tid)
+        self.s.release(tid, "причина", "claude")
+        after = self.get(tid)
+        self.assertEqual(after["status"], "todo")
+        self.assertEqual(after["domains"], before["domains"])
+        self.assertEqual((after["text"], after["title"]), (before["text"], before["title"]))
+
+    def test_reason_is_recorded_in_history(self):
+        tid = self.claimed_task()
+        self.s.release(tid, "нема мережі", "claude")
+        recs = self.history_of(tid, "elf_release")
+        self.assertEqual(len(recs), 1)
+        self.assertIn("нема мережі", json.dumps(recs[0], ensure_ascii=False))
+
+    def test_reason_creates_elf_section_in_plan_when_there_is_no_plan(self):
+        tid = self.claimed_task()
+        self.s.release(tid, "нема мережі", "claude")
+        self.assertEqual(
+            self.plan(tid), f"## Elf\n- {TODAY} release (claude): нема мережі\n"
+        )
+
+    def test_reason_adds_elf_section_after_existing_plan(self):
+        tid = self.claimed_task(plan="# План\n- крок 1\n")
+        self.s.release(tid, "тайм-аут", "codex")
+        self.assertEqual(
+            self.plan(tid),
+            f"# План\n- крок 1\n\n## Elf\n- {TODAY} release (codex): тайм-аут\n",
+        )
+
+    def test_second_release_appends_to_the_same_elf_section(self):
+        tid = self.claimed_task()
+        self.s.release(tid, "раз", "claude")
+        self.s.move_task(tid, "in_progress")
+        self.s.release(tid, "два", "claude")
+        self.assertEqual(
+            self.plan(tid),
+            f"## Elf\n- {TODAY} release (claude): раз\n- {TODAY} release (claude): два\n",
+        )
+
+    def test_line_goes_to_the_end_of_elf_section_before_the_next_heading(self):
+        old = "## Elf\n- старий запис\n\n## Нотатки\nтекст\n"
+        tid = self.claimed_task(plan=old)
+        self.s.release(tid, "новий", "claude")
+        self.assertEqual(
+            self.plan(tid),
+            f"## Elf\n- старий запис\n- {TODAY} release (claude): новий\n\n## Нотатки\nтекст\n",
+        )
+
+    def test_multiline_reason_is_collapsed_to_one_line(self):
+        tid = self.claimed_task()
+        self.s.release(tid, "рядок 1\nрядок 2", "claude")
+        self.assertEqual(
+            self.plan(tid), f"## Elf\n- {TODAY} release (claude): рядок 1 рядок 2\n"
+        )
+
+    def test_fifth_failure_blocks_automatically(self):
+        tid = self.claimed_task()
+        self.seed_failures(tid, 4)
+        res = self.s.release(tid, "знову впало", "claude")
+        self.assertEqual(self.failures(tid), 5)
+        domains = self.get(tid)["domains"]
+        self.assertIn("blocked", domains)
+        self.assertNotIn("to-agent", domains)
+        blockers = self.s.list_tasks(status="blockers")
+        self.assertEqual(len(blockers), 1)
+        self.assertIn("5 невдач: знову впало", blockers[0]["text"])
+        self.assertEqual((res["blocker"] or {}).get("id"), blockers[0]["id"])
+        self.assertIn(f"- {TODAY} block (claude): 5 невдач: знову впало", self.plan(tid) or "")
+
+    def test_fourth_failure_does_not_block(self):
+        tid = self.claimed_task()
+        self.seed_failures(tid, 3)
+        res = self.s.release(tid, "ще раз", "claude")
+        self.assertEqual(self.failures(tid), 4)
+        self.assertIsNone(res.get("blocker", "відсутній"))
+        self.assertEqual(self.s.list_tasks(status="blockers"), [])
+        self.assertIn("to-agent", self.get(tid)["domains"])
+        self.assertNotIn("blocked", self.get(tid)["domains"])
+
+    def test_release_unknown_id_is_an_error(self):
+        with self.assertRaises(PlannerError):
+            self.s.release("nope00", "причина", "claude")
+
+    def test_release_task_not_in_progress_is_an_error_and_changes_nothing(self):
+        tid = self.task("У todo", ("to-agent", "claude"))
+        with self.assertRaises(PlannerError):
+            self.s.release(tid, "причина", "claude")
+        self.assertEqual(self.get(tid)["status"], "todo")
+        self.assertFalse((self.root / "elf-state.json").exists())
+        self.assertIsNone(self.get(tid).get("plan"))
+
+    def test_release_requires_a_reason_and_a_known_agent(self):
+        tid = self.claimed_task()
+        with self.assertRaises(PlannerError):
+            self.s.release(tid, "  ", "claude")
+        with self.assertRaises(PlannerError):
+            self.s.release(tid, "причина", "gemini")
+        self.assertEqual(self.get(tid)["status"], "in_progress")
+
 
 
 if __name__ == "__main__":
