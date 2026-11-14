@@ -535,6 +535,24 @@ def edit_task(
     return "✅ Оновлено: " + _fmt_short(t)
 
 
+@mcp.tool(annotations=_WRITE, structured_output=False)
+def elf_claim(agent: str) -> str:
+    """Elf: взяти верхню задачу To Do для агента."""
+    return ""
+
+
+@mcp.tool(annotations=_WRITE, structured_output=False)
+def elf_release(id: str, reason: str, agent: str) -> str:
+    """Elf: повернути задачу в To Do з причиною."""
+    return ""
+
+
+@mcp.tool(annotations=_WRITE, structured_output=False)
+def elf_block(id: str, reason: str, agent: str) -> str:
+    """Elf: заблокувати задачу й завести блокер для адміна."""
+    return ""
+
+
 @mcp.tool(annotations=_DESTRUCTIVE, structured_output=False)
 def delete_task(id: str) -> str:
     """Видалити задачу за id (безповоротно з файлу planner)."""

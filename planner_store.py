@@ -660,6 +660,16 @@ class PlannerStore:
             d.name for d in proj_dir.iterdir() if d.is_dir() and (d / "template.md").exists()
         )
 
+    # --- Elf: робочий цикл агента ---------------------------------------------
+    def claim(self, agent: str) -> dict | None:
+        return None
+
+    def release(self, task_id: str, reason: str, agent: str) -> dict:
+        return {}
+
+    def block(self, task_id: str, reason: str, agent: str) -> dict:
+        return {}
+
     # --- helpers -------------------------------------------------------------
     def _logged_edit(self, before: dict, task: Task, plan: str | None) -> dict:
         after = _with_plan(task.to_dict(), plan)

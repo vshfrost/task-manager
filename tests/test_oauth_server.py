@@ -29,6 +29,7 @@ REDIRECT = "https://chatgpt.example/connector/oauth/cb"
 READ_ONLY = {"list_tasks", "get_task", "board", "history"}
 DESTRUCTIVE = {"edit_task", "delete_task"}
 IDEMPOTENT = {"move_task", "set_priority", "set_deadline"}
+ELF = {"elf_claim", "elf_release", "elf_block"}  # пишуть, не ідемпотентні, не деструктивні
 
 
 class OAuthCase(ServerCase):
@@ -269,7 +270,7 @@ class DiscoveryInterfaceTests(OAuthCase):
 
     def test_tool_annotations(self):
         tools = asyncio.run(self.tm.mcp.list_tools())
-        self.assertEqual({t.name for t in tools}, READ_ONLY | DESTRUCTIVE | IDEMPOTENT | {"add_task"})
+        self.assertEqual({t.name for t in tools}, READ_ONLY | DESTRUCTIVE | IDEMPOTENT | {"add_task", *ELF})
         for t in tools:
             with self.subTest(tool=t.name):
                 a = t.annotations
