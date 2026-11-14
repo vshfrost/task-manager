@@ -448,7 +448,8 @@ class ElfToolsTests(ServerCase):
         )
         out = self.call("elf_release", id=tid, reason="знову", agent="claude")
         self.assertIn("Заблоковано", out)
-        self.assertIn("5 невдач: знову", self.call("list_tasks", status="blockers"))
+        blocker_id = self.call("list_tasks", status="blockers").split("`")[1]
+        self.assertIn("5 невдач: знову", self.call("get_task", id=blocker_id))
 
     def test_block_reports_the_blocker_id(self):
         tid = self.todo("Задача")
