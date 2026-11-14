@@ -164,6 +164,12 @@ uv run task_manager.py                    # MCP-сервер (stdio)
 - `TASKS_PLANNER_ROOT` — корінь planner (за замовч. `~/AI/planner`; на сервері — `/srv/planner`, задає конфіг інстансу).
 - `TASKS_WIP_LIMIT` — ліміт in progress (за замовч. `15`).
 - `TASKS_TOKEN` — bearer-секрет (генеруєш САМ, §8).
+- `TASKS_ELF_TOKEN` — опційний другий bearer для раннера `elf` (генеруєш САМ, §8; порожньо = вимкнено).
+  Лише на bearer-інстансі, лише з loopback (`127.0.0.1`/`::1`), лише тули `elf_*`, `list_tasks`,
+  `get_task`, `board`; решта тулів і дашборд → 403; зміни в журналі з клієнтом `elf`.
+  Задається в `/etc/task-manager/env` поруч із `TASKS_TOKEN` (`TASKS_ELF_TOKEN=<секрет>`), далі
+  `sudo systemctl restart task-manager`. Раннер має ходити на `:8792` напряму: за reverse-проксі
+  на тому ж хості перевірка loopback нічого не дає.
 - `TASKS_OAUTH_PASSWORD_HASH` — хеш пароля OAuth (згенеруй: `python3 -c "from getpass import getpass; from tasks_oauth import hash_password; print(hash_password(getpass()))"` у теці репо; пароль вводиш сам).
 - `TASKS_ISSUER_URL` — публічний issuer, напр. `https://<host>/tasks`.
 - `TASKS_RESOURCE_URL` — resource для привʼязки токенів (за замовч. = issuer, якщо той закінчується на `/tasks`).
