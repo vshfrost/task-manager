@@ -114,6 +114,11 @@ class ElfDeniedTests(TokenCase):
         self.assertEqual(self.statuses(), before)
         self.assertEqual(self.tm.store.get_task(tid)["text"], "Fixture task")
 
+    def test_elf_token_cannot_call_project_tools(self):
+        for name, args in (("create_project", {"slug": "demo", "name": "Demo"}), ("list_projects", {})):
+            with self.subTest(tool=name):
+                self.assertEqual(self.tool(ELF, name, args).status_code, 403)
+
     def test_elf_token_from_non_loopback_is_forbidden(self):
         self.seed()
         for client in (("192.0.2.10", 5), ("2001:db8::1", 5)):
