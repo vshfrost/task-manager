@@ -766,6 +766,26 @@ class PlannerStore:
             )
             return self._elf_result(task, _failures(self._read_elf_state(), task_id), blocker)
 
+    def submit(self, task_id: str, agent: str, pr: str = "") -> dict:
+        """Заглушка (red): реалізація — у feat-коміті."""
+        return {}
+
+    def ci(self, task_id: str, result: str) -> dict:
+        """Заглушка (red): реалізація — у feat-коміті."""
+        return {}
+
+    def review_next(self, agent: str) -> list[dict]:
+        """Заглушка (red): реалізація — у feat-коміті."""
+        return []
+
+    def merged(self, task_id: str) -> dict:
+        """Заглушка (red): реалізація — у feat-коміті."""
+        return {}
+
+    def send_back(self, task_id: str, comment: str, agent: str) -> dict:
+        """Заглушка (red): реалізація — у feat-коміті."""
+        return {}
+
     def _elf_return(
         self, store: dict[str, list[Block]], task: Task, kind: str, agent: str, reason: str,
         *, tool: str, failures: tuple[int, int] | None = None, blocker: Task | None = None,

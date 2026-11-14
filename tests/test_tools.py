@@ -217,6 +217,9 @@ class InterfaceTests(ServerCase):
             "board": set(), "history": set(), "get_task": {"id"},
             "elf_claim": {"agent"}, "elf_release": {"id", "reason", "agent"},
             "elf_block": {"id", "reason", "agent"},
+            "elf_submit": {"id", "agent"}, "elf_ci": {"id", "result"},
+            "elf_review_next": {"agent"}, "elf_merged": {"id"},
+            "elf_return": {"id", "comment", "agent"},
         }
         self.assertEqual(set(tools), set(required))
         for name, req in required.items():

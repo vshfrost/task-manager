@@ -584,6 +584,38 @@ def elf_block(id: str, reason: str, agent: str) -> str:
     return f"⛔ Заблоковано: `{r['task']['id']}`; блокер для адміна `{r['blocker']['id']}`"
 
 
+@mcp.tool(annotations=_WRITE, structured_output=False)
+def elf_submit(id: str, agent: str, pr: str = "") -> str:
+    """Заглушка (red)."""
+    return ""
+
+
+@mcp.tool(annotations=_WRITE, structured_output=False)
+def elf_ci(id: str, result: str) -> str:
+    """Заглушка (red)."""
+    return ""
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False), structured_output=False
+)
+def elf_review_next(agent: str) -> str:
+    """Заглушка (red)."""
+    return ""
+
+
+@mcp.tool(annotations=_WRITE, structured_output=False)
+def elf_merged(id: str) -> str:
+    """Заглушка (red)."""
+    return ""
+
+
+@mcp.tool(annotations=_WRITE, structured_output=False)
+def elf_return(id: str, comment: str, agent: str) -> str:
+    """Заглушка (red)."""
+    return ""
+
+
 @mcp.tool(annotations=_DESTRUCTIVE, structured_output=False)
 def delete_task(id: str) -> str:
     """Видалити задачу за id (безповоротно з файлу planner)."""
