@@ -26,7 +26,7 @@ from tasks_oauth import ResourceGuard, hash_password  # noqa: E402
 RESOURCE = "https://tasks.example/tasks"
 PASSWORD = "offline-password-fixture"
 REDIRECT = "https://chatgpt.example/connector/oauth/cb"
-READ_ONLY = {"list_tasks", "get_task", "board", "history"}
+READ_ONLY = {"list_tasks", "get_task", "board", "history", "list_projects"}
 DESTRUCTIVE = {"edit_task", "delete_task"}
 IDEMPOTENT = {"move_task", "set_priority", "set_deadline"}
 
@@ -269,7 +269,7 @@ class DiscoveryInterfaceTests(OAuthCase):
 
     def test_tool_annotations(self):
         tools = asyncio.run(self.tm.mcp.list_tools())
-        self.assertEqual({t.name for t in tools}, READ_ONLY | DESTRUCTIVE | IDEMPOTENT | {"add_task"})
+        self.assertEqual({t.name for t in tools}, READ_ONLY | DESTRUCTIVE | IDEMPOTENT | {"add_task", "create_project"})
         for t in tools:
             with self.subTest(tool=t.name):
                 a = t.annotations

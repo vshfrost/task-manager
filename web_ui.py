@@ -172,6 +172,25 @@ def register(mcp, store, *, is_oauth: bool) -> None:
             return _err(e)
         return JSONResponse({"tag_colors": colors})
 
+    @mcp.custom_route("/api/projects", methods=["GET"])
+    @_as_web
+    async def api_projects(request: Request):
+        try:
+            return JSONResponse({"projects": store.list_projects()})
+        except PlannerError as e:
+            return _err(e)
+
+    @mcp.custom_route("/api/project", methods=["POST"])
+    @_as_web
+    async def api_project(request: Request):
+        # {"slug": "alpha", "name": "Alpha", "repo": "owner/name" | ""}
+        try:
+            d = await _body(request)
+            project = store.create_project(d.get("slug"), d.get("name"), d.get("repo") or "")
+        except PlannerError as e:
+            return _err(e)
+        return JSONResponse({"project": project})
+
     @mcp.custom_route("/api/task/add", methods=["POST"])
     @_as_web
     async def api_add(request: Request):
@@ -442,6 +461,8 @@ PAGE = r"""<!doctype html>
   <div class="grow"></div>
   <button class="ghost" id="tagsBtn" title="Кольори тегів"
           style="background:none;border:1px solid var(--line);color:inherit;border-radius:8px;padding:6px 10px;cursor:pointer">🎨</button>
+  <button class="ghost" id="projBtn" title="Новий проєкт"
+          style="background:none;border:1px solid var(--line);color:inherit;border-radius:8px;padding:6px 10px;cursor:pointer">📁</button>
   <select id="tpl" title="Шаблони задач: створити типову задачу в один клік"></select>
   <button class="primary" id="addBtn">+ Задача</button>
 </header>
@@ -501,6 +522,18 @@ PAGE = r"""<!doctype html>
   <div class="err" id="tagsErr"></div>
   <div id="tagsList"></div>
   <div class="actions"><button type="button" class="ghost" id="tagsClose">Закрити</button></div>
+</form></dialog>
+
+<dialog id="projDlg"><form class="dlg" method="dialog">
+  <h3>Новий проєкт</h3>
+  <div class="err" id="projErr"></div>
+  <div class="row"><label>Слаг</label><input id="p_slug" placeholder="my-project (a-z, 0-9, -)"></div>
+  <div class="row"><label>Назва</label><input id="p_name"></div>
+  <div class="row"><label>Репозиторій</label><input id="p_repo" placeholder="owner/name (необовʼязково)"></div>
+  <div class="actions">
+    <button type="button" class="ghost" id="projCancel">Скасувати</button>
+    <button type="button" class="primary" id="projSave">Створити</button>
+  </div>
 </form></dialog>
 
 <div id="toast"></div>
@@ -1011,6 +1044,22 @@ function renderTagList(){
 }
 $("#tagsBtn").onclick = () => { renderTagList(); $("#tagsDlg").showModal(); };
 $("#tagsClose").onclick = () => $("#tagsDlg").close();
+
+// --- Новий проєкт: слаг, назва, репозиторій → реєстр проєктів ---
+async function createProject(){
+  const err = $("#projErr"); err.style.display = "none";
+  try {
+    await api("api/project", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({slug: $("#p_slug").value, name: $("#p_name").value, repo: $("#p_repo").value})});
+    $("#projDlg").close(); await load();
+  } catch(e){ err.textContent = e.message; err.style.display = "block"; }
+}
+$("#projBtn").onclick = () => {
+  ["#p_slug", "#p_name", "#p_repo"].forEach(id => $(id).value = "");
+  $("#projErr").style.display = "none"; $("#projDlg").showModal();
+};
+$("#projSave").onclick = createProject;
+$("#projCancel").onclick = () => $("#projDlg").close();
 $("#addBtn").onclick = () => openEdit(null);
 $("#saveBtn").onclick = save;
 $("#delBtn").onclick = del;
