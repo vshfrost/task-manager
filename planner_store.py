@@ -49,6 +49,11 @@ _DATE_RE = __import__("re").compile(r"^\d{4}-\d{2}-\d{2}$")
 # Кольори тегів: `<planner>/tag-colors.json` = {"<тег без #>": "#RRGGBB"}. Не файл задач.
 TAG_COLORS_FILE = "tag-colors.json"
 _COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+# Реєстр проєктів: `<planner>/projects.json` = {"<слаг>": {"name": str, "repo": "owner/name" | ""}}.
+# Не файл задач. Проєкт без запису тут (є лише `projects/<слаг>.md`) працює як і раніше.
+PROJECTS_FILE = "projects.json"
+_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
 def _is_date(value: str) -> bool:
@@ -570,6 +575,7 @@ class PlannerStore:
             tasks = self._all_tasks(store)
         projects = {_project_of(rel) for rel in store}
         projects |= set(self._template_projects())
+        projects |= set(self._projects_registry())
         domains: set[str] = set()
         links: set[str] = set()
         for t in tasks:
@@ -621,12 +627,67 @@ class PlannerStore:
             os.replace(tmp, path)
         return colors
 
-    # --- Реєстр проєктів (заглушки: реалізація — у наступному коміті) ---------
+    # --- Реєстр проєктів -----------------------------------------------------
     def create_project(self, slug: str, name: str, repo: str = "") -> dict:
-        return {"slug": "", "name": "", "repo": ""}
+        """Заводить проєкт у реєстрі. Слаг — `[a-z0-9-]`, не з дефіса, унікальний;
+        repo — порожній або `owner/name`. Повертає запис `{slug, name, repo}`."""
+        if not (isinstance(slug, str) and _SLUG_RE.match(slug)) or slug == "global":
+            raise PlannerError(
+                f"слаг проєкту — малі латинські літери, цифри й дефіс, не з дефіса "
+                f"(і не 'global'), отримано {slug!r}"
+            )
+        name = name.strip() if isinstance(name, str) else ""
+        if not name:
+            raise PlannerError("не вказано назву проєкту")
+        repo = repo.strip() if isinstance(repo, str) else repo
+        if repo is None:
+            repo = ""
+        if not (isinstance(repo, str) and (repo == "" or _REPO_RE.match(repo))):
+            raise PlannerError(f"repo має бути порожнім або у форматі owner/name, отримано {repo!r}")
+        with self._lock:
+            registry = self._projects_registry()
+            if slug in registry:
+                raise PlannerError(f"проєкт {slug!r} уже є")
+            registry[slug] = {"name": name, "repo": repo}
+            path = self.root / PROJECTS_FILE
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                f.write(json.dumps(registry, ensure_ascii=False, indent=2) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            os.replace(tmp, path)
+        return {"slug": slug, "name": name, "repo": repo}
 
     def list_projects(self) -> list[dict]:
-        return []
+        """Проєкти реєстру + ті, що є лише файлом `projects/<слаг>.md` (name/repo порожні).
+
+        Глобальний список (`tasks.md`) — не проєкт. Порядок — за слагом."""
+        with self._lock:
+            registry = self._projects_registry()
+            store = self._load()
+        out = {
+            slug: {"slug": slug, "name": e.get("name", ""), "repo": e.get("repo", "")}
+            for slug, e in registry.items()
+        }
+        for rel in store:
+            slug = _project_of(rel)
+            if slug != "global":
+                out.setdefault(slug, {"slug": slug, "name": "", "repo": ""})
+        return [out[k] for k in sorted(out)]
+
+    def _projects_registry(self) -> dict[str, dict]:
+        path = self.root / PROJECTS_FILE
+        if not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError:
+            raise PlannerError(f"{PROJECTS_FILE} — не валідний JSON")
+        if not isinstance(data, dict):
+            raise PlannerError(f"{PROJECTS_FILE} має бути JSON-обʼєктом")
+        return data
 
     def templates(self, project: str | None = None) -> list[dict]:
         """Шаблони задач із `projects/<слаг>/template.md` (по файлу на проєкт).
