@@ -535,6 +535,126 @@ def edit_task(
     return "✅ Оновлено: " + _fmt_short(t)
 
 
+def _elf_failed_text(r: dict) -> str:
+    """Відповідь, коли задача повернулась у To Do з +1 невдачею (release / red CI / return)."""
+    if r["blocker"]:
+        return (
+            f"⛔ Заблоковано після {r['failures']} невдач: `{r['task']['id']}`; "
+            f"блокер для адміна `{r['blocker']['id']}`"
+        )
+    return f"✅ Повернуто в to do (перша): `{r['task']['id']}` · Невдач: {r['failures']}"
+
+
+@mcp.tool(annotations=_WRITE, structured_output=False)
+def elf_claim(agent: str) -> str:
+    """Агент бере собі верхню задачу To Do: agent = claude|codex.
+    Підходить перша в порядку колонки To Do задача з тегом to-agent, без тега blocked і з тегом
+    агента (без тегів claude/codex — вона для claude). Задача стає in_progress; у відповіді id,
+    заголовок, текст, план і лічильник невдач. Підходящих задач нема — відповідь `no tasks`."""
+    try:
+        t = store.claim(agent.strip())
+    except PlannerError as e:
+        return f"⚠️ {e}"
+    if t is None:
+        return "no tasks"
+    return (
+        f"✅ Взято: `{t['id']}` [in progress] {t.get('title') or t['text']}\n"
+        f"Текст: {t['text']}\n"
+        f"Невдач: {t['failures']}\n"
+        f"План:\n{t['plan'] or '—'}"
+    )
+
+
+@mcp.tool(annotations=_WRITE, structured_output=False)
+def elf_release(id: str, reason: str, agent: str) -> str:
+    """Агент повертає задачу, яку не зміг зробити: in_progress → перша в To Do, лічильник
+    невдач +1, причина — у журнал і в розділ `## Elf` плану. agent = claude|codex.
+    П'ята невдача підряд блокує задачу так само, як elf_block."""
+    try:
+        r = store.release(id.strip(), reason, agent.strip())
+    except PlannerError as e:
+        return f"⚠️ {e}"
+    return _elf_failed_text(r)
+
+
+@mcp.tool(annotations=_WRITE, structured_output=False)
+def elf_block(id: str, reason: str, agent: str) -> str:
+    """Агент не може рухатись без людини: у blockers створюється задача для адміна (теги
+    to-admin + агент, той самий проєкт, у тексті id оригіналу й причина); оригінал з in_progress
+    стає першою в To Do без тега to-agent, з тегами blocked + агент. agent = claude|codex."""
+    try:
+        r = store.block(id.strip(), reason, agent.strip())
+    except PlannerError as e:
+        return f"⚠️ {e}"
+    return f"⛔ Заблоковано: `{r['task']['id']}`; блокер для адміна `{r['blocker']['id']}`"
+
+
+@mcp.tool(annotations=_WRITE, structured_output=False)
+def elf_submit(id: str, agent: str, pr: str = "") -> str:
+    """Агент здає зроблену задачу: in_progress → in_review (задача з тегом dev; посилання на PR
+    у pr обов'язкове) або → testing (без тега dev; pr за бажанням). PR зберігається, рядок про
+    здачу — у розділі `## Elf` плану. agent = claude|codex."""
+    try:
+        r = store.submit(id.strip(), agent.strip(), pr)
+    except PlannerError as e:
+        return f"⚠️ {e}"
+    t = r["task"]
+    pr_part = f" · PR {r['pr']}" if r["pr"] else ""
+    return f"✅ Здано: `{t['id']}` [{_STATUS_LABEL[t['status']]}]{pr_part}"
+
+
+@mcp.tool(annotations=_WRITE, structured_output=False)
+def elf_ci(id: str, result: str) -> str:
+    """Результат CI для задачі в in_review: result = green|red. green — запам'ятати (задача
+    з'явиться в elf_review_next). red — задача стає першою в To Do, лічильник невдач +1,
+    рядок у `## Elf` плану; п'ята невдача блокує задачу так само, як elf_block."""
+    try:
+        r = store.ci(id.strip(), result.strip())
+    except PlannerError as e:
+        return f"⚠️ {e}"
+    if result.strip() == "green":
+        return f"✅ CI green: `{r['task']['id']}` — готова до рев'ю"
+    return _elf_failed_text(r)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False), structured_output=False
+)
+def elf_review_next(agent: str) -> str:
+    """Що рев'юити: задачі в in_review із зеленим CI для агента (claude|codex; без тегів
+    агентів — claude), у порядку колонки; у кожної id, заголовок і посилання на PR.
+    Нічого не змінює. Підходящих нема — відповідь `nothing to review`."""
+    try:
+        items = store.review_next(agent.strip())
+    except PlannerError as e:
+        return f"⚠️ {e}"
+    if not items:
+        return "nothing to review"
+    return "\n".join(f"`{i['id']}` {i['title']} · PR {i['pr'] or '—'}" for i in items)
+
+
+@mcp.tool(annotations=_WRITE, structured_output=False)
+def elf_merged(id: str) -> str:
+    """PR задачі змерджено: in_review → testing, рядок у `## Elf` плану."""
+    try:
+        t = store.merged(id.strip())
+    except PlannerError as e:
+        return f"⚠️ {e}"
+    return f"✅ Змерджено: `{t['id']}` [{_STATUS_LABEL[t['status']]}]"
+
+
+@mcp.tool(annotations=_WRITE, structured_output=False)
+def elf_return(id: str, comment: str, agent: str) -> str:
+    """Рев'юер повертає задачу з правками: in_review → перша в To Do, лічильник невдач +1,
+    коментар дописується в `## Elf` плану, результат CI скидається. agent = claude|codex.
+    П'ята невдача підряд блокує задачу так само, як elf_block."""
+    try:
+        r = store.send_back(id.strip(), comment, agent.strip())
+    except PlannerError as e:
+        return f"⚠️ {e}"
+    return _elf_failed_text(r)
+
+
 @mcp.tool(annotations=_DESTRUCTIVE, structured_output=False)
 def delete_task(id: str) -> str:
     """Видалити задачу за id (безповоротно з файлу planner)."""

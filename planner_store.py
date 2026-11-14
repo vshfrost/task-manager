@@ -11,6 +11,9 @@ list / add / move (з правилами переходів і WIP-гардом)
 - Запис — атомарний (`os.replace`) під `fcntl.flock` (безпечно навіть якщо Obsidian редагує).
 - Ручний порядок колонки To Do — `<planner>/todo-order.json` (список id): задачі To Do лежать
   у різних файлах проєктів, тож порядок рядків файлу його не передає. Це не файл задач.
+- Стан робочого циклу Elf — `<planner>/elf-state.json` = {id: {"failures": N, "pr": url,
+  "ci": "green"}}: лічильник невдач, PR і результат CI не потрапляють в рядок задачі.
+  Це не файл задач.
 - WIP-ліміт: не більше MAX_IN_PROGRESS задач у статусі `in_progress` (по всьому planner).
 """
 from __future__ import annotations
@@ -84,6 +87,16 @@ UNSET = _Unset()
 
 PLANS_DIRNAME = "plans"
 TODO_ORDER_FILENAME = "todo-order.json"
+
+# Робочий цикл Elf: агенти, поріг невдач, службові теги (теги задачі — це її `domains`).
+ELF_STATE_FILENAME = "elf-state.json"
+ELF_AGENTS = ("claude", "codex")
+ELF_MAX_FAILURES = 5
+ELF_TAG_QUEUE, ELF_TAG_BLOCKED, ELF_TAG_ADMIN = "to-agent", "blocked", "to-admin"
+ELF_TAG_DEV = "dev"
+ELF_CI_RESULTS = ("green", "red")
+_ELF_HEADING_RE = re.compile(r"^## Elf[ \t]*$", re.M)
+_NEXT_HEADING_RE = re.compile(r"^#{1,2} ", re.M)
 
 
 def _check_position(position: int | None) -> None:
@@ -728,6 +741,244 @@ class PlannerStore:
             d.name for d in proj_dir.iterdir() if d.is_dir() and (d / "template.md").exists()
         )
 
+    # --- Elf: робочий цикл агента ---------------------------------------------
+    def _read_elf_state(self) -> dict[str, dict]:
+        """{id: {"failures": N}}. Немає файлу чи він зіпсований — порожній (усі лічильники 0)."""
+        try:
+            data = json.loads((self.root / ELF_STATE_FILENAME).read_text(encoding="utf-8"))
+        except (FileNotFoundError, ValueError):
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        return {k: v for k, v in data.items() if isinstance(v, dict)}
+
+    def _write_elf_state(self, state: dict[str, dict]) -> None:
+        path = self.root / ELF_STATE_FILENAME
+        tmp = path.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            f.write(json.dumps(state, ensure_ascii=False, indent=2) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        os.replace(tmp, path)
+
+    def claim(self, agent: str) -> dict | None:
+        """Атомарно бере ВЕРХНЮ задачу To Do (ручний порядок) для агента → in_progress.
+
+        Підходить задача з тегом `to-agent` без `blocked` і з тегом агента (без тегів
+        `claude`/`codex` — це claude). Черга порожня — None, нічого не рухається."""
+        _check_agent(agent)
+        with self._lock:
+            store = self._load()
+            tasks = self._all_tasks(store)
+            by_id = {t.id: t for t in tasks}
+            task = next(
+                (by_id[i] for i in self._todo_order(tasks) if _elf_eligible(by_id[i], agent)),
+                None,
+            )
+            if task is None:
+                return None
+            if self._count_ip(store) >= MAX_IN_PROGRESS:
+                raise PlannerError(
+                    f"WIP-ліміт: вже {MAX_IN_PROGRESS} задач в in progress. "
+                    "Заверши/поверни одну, перш ніж брати нову."
+                )
+            before = task.to_dict()
+            task.status = "in_progress"
+            self._write_blocks(task.file, store[task.file])
+            self._sync_todo_order(tasks, task)
+            self.history.record(
+                "edit", tool="elf_claim", task_id=task.id, file=task.file,
+                changes={**diff(before, task.to_dict()), "elf": [None, f"claim ({agent})"]},
+            )
+            return {
+                **task.to_dict(),
+                "plan": self._read_plan(task.id),
+                "failures": _failures(self._read_elf_state(), task.id),
+            }
+
+    def release(self, task_id: str, reason: str, agent: str) -> dict:
+        """in_progress → нагору To Do, невдач +1, причина — в журнал і в `## Elf` плану.
+        На 5-й невдачі замість цього — block (причина «5 невдач: …»)."""
+        _check_agent(agent)
+        reason = _elf_reason(reason)
+        with self._lock:
+            store = self._load()
+            task = self._find(store, task_id)
+            _require_in_progress(task)
+            return self._elf_fail(store, task, "release", agent, reason, tool="elf_release")
+
+    def _elf_fail(
+        self, store: dict[str, list[Block]], task: Task, kind: str, agent: str, reason: str,
+        *, tool: str,
+    ) -> dict:
+        """Спільне для release / red CI / return під уже взятим замком: невдач +1 (старий
+        результат CI скидається), задача нагору To Do; 5-та невдача — block."""
+        state = self._read_elf_state()
+        was = _failures(state, task.id)
+        failures = was + 1
+        entry = {k: v for k, v in state.get(task.id, {}).items() if k != "ci"}
+        state[task.id] = {**entry, "failures": failures}
+        self._write_elf_state(state)
+        blocker = None
+        if failures >= ELF_MAX_FAILURES:
+            reason = f"{ELF_MAX_FAILURES} невдач: {reason}"
+            blocker = _elf_blocker(task, reason, agent)
+        self._elf_return(
+            store, task, "block" if blocker else kind, agent, reason,
+            tool=tool, failures=(was, failures), blocker=blocker,
+        )
+        return self._elf_result(task, failures, blocker)
+
+    def block(self, task_id: str, reason: str, agent: str) -> dict:
+        """Нова задача в blockers (`to-admin` + тег агента, той самий проєкт); оригінал:
+        −`to-agent`, +`blocked`, +тег агента, нагору To Do. Причина — і в `## Elf` плану."""
+        _check_agent(agent)
+        reason = _elf_reason(reason)
+        with self._lock:
+            store = self._load()
+            task = self._find(store, task_id)
+            _require_in_progress(task)
+            blocker = _elf_blocker(task, reason, agent)
+            self._elf_return(
+                store, task, "block", agent, reason, tool="elf_block", blocker=blocker,
+            )
+            return self._elf_result(task, _failures(self._read_elf_state(), task_id), blocker)
+
+    def submit(self, task_id: str, agent: str, pr: str = "") -> dict:
+        """in_progress → in_review (задача з тегом `dev`, посилання на PR обов'язкове) або
+        testing (без `dev`, PR за бажанням). PR — у `elf-state.json`, рядок — у `## Elf` плану;
+        старий результат CI скидається."""
+        _check_agent(agent)
+        pr = " ".join((pr or "").split())
+        with self._lock:
+            store = self._load()
+            task = self._find(store, task_id)
+            _require_status(task, "in_progress", "передати на рев'ю")
+            dev = ELF_TAG_DEV in task.domains
+            if dev and not pr:
+                raise PlannerError("Для dev-задачі потрібне посилання на PR")
+            state = self._read_elf_state()
+            entry = {k: v for k, v in state.get(task_id, {}).items() if k != "ci"}
+            state[task_id] = {**entry, **({"pr": pr} if pr else {})}
+            self._write_elf_state(state)
+            target = "in_review" if dev else "testing"
+            line = f"submit ({agent}): {target}" + (f", PR {pr}" if pr else "")
+            self._elf_advance(store, task, target, line, tool="elf_submit")
+            return {"task": _with_plan(task.to_dict(), self._read_plan(task_id)), "pr": pr or None}
+
+    def ci(self, task_id: str, result: str) -> dict:
+        """Результат CI для задачі в in_review. green — лише запам'ятати (`ci` у стані);
+        red — як невдача: нагору To Do, невдач +1 (5-та блокує), рядок у `## Elf`."""
+        if result not in ELF_CI_RESULTS:
+            raise PlannerError(f"Невідомий результат CI '{result}'. Дозволено: {', '.join(ELF_CI_RESULTS)}")
+        with self._lock:
+            store = self._load()
+            task = self._find(store, task_id)
+            _require_status(task, "in_review", "прийняти результат CI")
+            if result == "red":
+                return self._elf_fail(
+                    store, task, "ci", _task_agent(task), "CI red", tool="elf_ci"
+                )
+            state = self._read_elf_state()
+            old = state.get(task_id, {}).get("ci")
+            state[task_id] = {**state.get(task_id, {}), "ci": "green"}
+            self._write_elf_state(state)
+            self.history.record(
+                "edit", tool="elf_ci", task_id=task_id, file=task.file,
+                changes={"ci": [old, "green"]},
+            )
+            return self._elf_result(task, _failures(state, task_id), None)
+
+    def review_next(self, agent: str) -> list[dict]:
+        """Лише читає: задачі in_review із зеленим CI для агента (без тегів агентів — claude),
+        у порядку in_review; у кожної id, title і посилання на PR."""
+        _check_agent(agent)
+        tasks = self.list_tasks(status="in_review")
+        with self._lock:
+            state = self._read_elf_state()
+            by_id = {t.id: t for t in self._all_tasks(self._load())}
+        return [
+            {"id": t["id"], "title": t["title"] or t["text"], "pr": state[t["id"]].get("pr")}
+            for t in tasks
+            if state.get(t["id"], {}).get("ci") == "green" and _has_agent(by_id[t["id"]], agent)
+        ]
+
+    def merged(self, task_id: str) -> dict:
+        """PR змерджено: in_review → testing, рядок у `## Elf`."""
+        with self._lock:
+            store = self._load()
+            task = self._find(store, task_id)
+            _require_status(task, "in_review", "позначити змерджено")
+            self._elf_advance(store, task, "testing", "merged", tool="elf_merged")
+            return _with_plan(task.to_dict(), self._read_plan(task_id))
+
+    def send_back(self, task_id: str, comment: str, agent: str) -> dict:
+        """Рев'юер повертає задачу: in_review → нагору To Do, невдач +1 (5-та блокує),
+        коментар — у `## Elf` плану; результат CI скидається."""
+        _check_agent(agent)
+        comment = _elf_reason(comment)
+        with self._lock:
+            store = self._load()
+            task = self._find(store, task_id)
+            _require_status(task, "in_review", "повернути з рев'ю")
+            return self._elf_fail(store, task, "return", agent, comment, tool="elf_return")
+
+    def _elf_advance(
+        self, store: dict[str, list[Block]], task: Task, status: str, line: str, *, tool: str
+    ) -> None:
+        """Спільний хвіст submit/merged під замком: новий статус, рядок у `## Elf` плану, журнал."""
+        old_plan = self._read_plan(task.id)
+        before = _with_plan(task.to_dict(), old_plan)
+        task.status = status
+        new_plan = _add_elf_line(old_plan, f"- {date.today().isoformat()} {line}")
+        self._write_plan(task.id, new_plan)
+        self._write_blocks(task.file, store[task.file])
+        self._sync_todo_order(self._all_tasks(store), task)
+        self.history.record(
+            "edit", tool=tool, task_id=task.id, file=task.file,
+            changes={**diff(before, _with_plan(task.to_dict(), new_plan)), "elf": [None, line]},
+        )
+
+    def _elf_return(
+        self, store: dict[str, list[Block]], task: Task, kind: str, agent: str, reason: str,
+        *, tool: str, failures: tuple[int, int] | None = None, blocker: Task | None = None,
+    ) -> None:
+        """Спільний хвіст release/block під уже взятим замком: задача нагору To Do, рядок у
+        `## Elf` плану, запис у журнал; для block ще й нова задача-блокер."""
+        old_plan = self._read_plan(task.id)
+        before = _with_plan(task.to_dict(), old_plan)
+        task.status = "todo"
+        if blocker is not None:
+            tags = [d for d in task.domains if d != ELF_TAG_QUEUE]
+            task.domains = [*tags, *(t for t in (ELF_TAG_BLOCKED, agent) if t not in tags)]
+            blocker.file = task.file
+            store[task.file] = _insert_task(store[task.file], blocker)
+        line = f"{kind} ({agent}): {reason}"
+        new_plan = _add_elf_line(old_plan, f"- {date.today().isoformat()} {line}")
+        self._write_plan(task.id, new_plan)
+        self._write_blocks(task.file, store[task.file])
+        self._sync_todo_order(self._all_tasks(store), task, 1, True)
+        changes = {**diff(before, _with_plan(task.to_dict(), new_plan)), "elf": [None, line]}
+        if failures:
+            changes["failures"] = list(failures)
+        self.history.record(
+            "edit", tool=tool, task_id=task.id, file=task.file, changes=changes
+        )
+        if blocker is not None:
+            self.history.record(
+                "add", tool=tool, task_id=blocker.id, file=blocker.file,
+                changes=initial(blocker.to_dict()),
+            )
+
+    def _elf_result(self, task: Task, failures: int, blocker: Task | None) -> dict:
+        return {
+            "task": _with_plan(task.to_dict(), self._read_plan(task.id)),
+            "failures": failures,
+            "blocker": blocker.to_dict() if blocker else None,
+        }
+
     # --- helpers -------------------------------------------------------------
     def _logged_edit(self, before: dict, task: Task, plan: str | None) -> dict:
         after = _with_plan(task.to_dict(), plan)
@@ -808,6 +1059,85 @@ def _auto_title(text: str) -> str:
         return t
     cut = t[: TITLE_MAX - 1].rsplit(" ", 1)[0].rstrip(" ,.;:—–-")
     return (cut or t[: TITLE_MAX - 1]) + "…"
+
+
+def _check_agent(agent: str) -> None:
+    if agent not in ELF_AGENTS:
+        raise PlannerError(f"Невідомий агент '{agent}'. Дозволено: {', '.join(ELF_AGENTS)}")
+
+
+def _elf_reason(reason: str) -> str:
+    """Причина — один непорожній рядок (рядок журналу в плані й текст блокера не ламаються)."""
+    one_line = " ".join((reason or "").split())
+    if not one_line:
+        raise PlannerError("Вкажи причину")
+    return one_line
+
+
+def _require_in_progress(task: Task) -> None:
+    if task.status != "in_progress":
+        raise PlannerError(
+            f"Задача `{task.id}` у статусі {task.status}: повернути чи заблокувати можна лише in_progress"
+        )
+
+
+def _require_status(task: Task, status: str, action: str) -> None:
+    if task.status != status:
+        raise PlannerError(f"Задача `{task.id}` у статусі {task.status}: {action} можна лише з {status}")
+
+
+def _failures(state: dict[str, dict], task_id: str) -> int:
+    n = state.get(task_id, {}).get("failures", 0)
+    return n if isinstance(n, int) and not isinstance(n, bool) and n > 0 else 0
+
+
+def _elf_eligible(task: Task, agent: str) -> bool:
+    """Задачу може взяти `agent`: `to-agent` є, `blocked` нема; тег агента є, або тегів
+    агентів нема взагалі і agent = claude."""
+    tags = set(task.domains)
+    if ELF_TAG_QUEUE not in tags or ELF_TAG_BLOCKED in tags:
+        return False
+    return _has_agent(task, agent)
+
+
+def _has_agent(task: Task, agent: str) -> bool:
+    """Тег агента є, або тегів агентів нема взагалі і agent = claude."""
+    tags = set(task.domains)
+    return agent in tags or (agent == "claude" and not tags & set(ELF_AGENTS))
+
+
+def _task_agent(task: Task) -> str:
+    """Агент задачі за тегом; без тегів агентів — claude."""
+    return next((a for a in ELF_AGENTS if a in task.domains), "claude")
+
+
+def _elf_blocker(task: Task, reason: str, agent: str) -> Task:
+    """Нова задача для адміна в blockers: id і причина — у тексті, заголовок ≤TITLE_MAX."""
+    title = f"Блокер {task.id}: {task.title or task.text}"
+    if len(title) > TITLE_MAX:
+        title = title[: TITLE_MAX - 1].rstrip() + "…"
+    return Task(
+        id=new_id(),
+        status="blockers",
+        text=f"Elf ({agent}) заблокований на задачі {task.id}: {reason}",
+        domains=[ELF_TAG_ADMIN, agent],
+        title=_clean_title(title),
+    )
+
+
+def _add_elf_line(plan: str | None, line: str) -> str:
+    """Дописує рядок наприкінці розділу `## Elf` плану; розділу нема — створює його в кінці."""
+    if plan is None:
+        return f"## Elf\n{line}\n"
+    m = _ELF_HEADING_RE.search(plan)
+    if m is None:
+        base = plan if plan.endswith("\n") else plan + "\n"
+        return f"{base}\n## Elf\n{line}\n"
+    nxt = _NEXT_HEADING_RE.search(plan, m.end())
+    end = nxt.start() if nxt else len(plan)
+    section = plan[m.end():end]
+    body = section.rstrip()
+    return f"{plan[:m.end()]}{body}\n{line}{section[len(body):] or chr(10)}{plan[end:]}"
 
 
 def _check_transition(old: str, new: str, *, via_mcp: bool = False) -> None:

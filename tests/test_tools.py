@@ -215,6 +215,11 @@ class InterfaceTests(ServerCase):
             "set_priority": {"id", "priority"}, "set_deadline": {"id", "deadline"},
             "edit_task": {"id"}, "delete_task": {"id"}, "list_tasks": set(),
             "board": set(), "history": set(), "get_task": {"id"},
+            "elf_claim": {"agent"}, "elf_release": {"id", "reason", "agent"},
+            "elf_block": {"id", "reason", "agent"},
+            "elf_submit": {"id", "agent"}, "elf_ci": {"id", "result"},
+            "elf_review_next": {"agent"}, "elf_merged": {"id"},
+            "elf_return": {"id", "comment", "agent"},
             "create_project": {"slug", "name"}, "list_projects": set(),
         }
         self.assertEqual(set(tools), set(required))
