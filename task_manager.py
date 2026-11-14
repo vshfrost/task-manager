@@ -667,6 +667,40 @@ def delete_task(id: str) -> str:
     return "🗑️ Видалено:\n" + _fmt(t)
 
 
+def _fmt_project(p: dict) -> str:
+    line = f"`{p['slug']}`"
+    if p["name"]:
+        line += f" — {p['name']}"
+    if p["repo"]:
+        line += f" ({p['repo']})"
+    return line
+
+
+@mcp.tool(annotations=_WRITE, structured_output=False)
+def create_project(slug: str, name: str, repo: str = "") -> str:
+    """Створити проєкт. slug — малі латинські літери, цифри й дефіс (не з дефіса), унікальний;
+    name — назва; repo — GitHub-репозиторій `owner/name` (можна порожньо).
+    Задачі з project=<slug> можна додавати й без створення проєкту — це лише довідник."""
+    try:
+        p = store.create_project(slug, name, repo)
+    except PlannerError as e:
+        return f"⚠️ {e}"
+    return "✅ Проєкт створено: " + _fmt_project(p)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False), structured_output=False)
+def list_projects() -> str:
+    """Список проєктів: слаг, назва, репозиторій. Проєкти, що є лише файлом задач
+    (без create_project), показані без назви й репозиторію."""
+    try:
+        projects = store.list_projects()
+    except PlannerError as e:
+        return f"⚠️ {e}"
+    if not projects:
+        return "Проєктів немає."
+    return "\n".join(_fmt_project(p) for p in projects)
+
+
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False), structured_output=False)
 def history(id: str = "", limit: int = 20) -> str:
     """Журнал змін задач: хто, коли і ЩО САМЕ змінив. Найновіші — зверху.
