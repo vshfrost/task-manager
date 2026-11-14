@@ -1,0 +1,28 @@
+[project]
+name = "task-manager"
+version = "0.1.0"
+description = "MCP-сервер керування задачами над доменом ~/AI/planner (канбан/календар; джерело — markdown)"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp[cli]>=2.1",   # 2.x: FastMCP → MCPServer (код мігровано 2026-09-06)
+    "python-dotenv>=1.0",
+]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = ["coverage>=7.6"]
+
+# Покриття: рядки + гілки, поріг 80% валить прогін (ZOMBIES-набір у tests/).
+#   uv run coverage run -m unittest discover -s tests && uv run coverage report
+[tool.coverage.run]
+branch = true
+source = ["."]
+omit = ["tests/*", "scripts/*", ".venv/*"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = false
+exclude_also = ['if __name__ == "__main__":']
