@@ -17,6 +17,7 @@ WIP-ліміт:       env TASKS_WIP_LIMIT (за замовч. 15)
 from __future__ import annotations
 
 import hmac
+import json
 import os
 import sys
 from pathlib import Path
@@ -31,6 +32,7 @@ except ImportError:
 from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
 
+from planner_history import as_client
 from planner_store import MAX_IN_PROGRESS, UNSET, PlannerError, PlannerStore
 
 # Людяний шлях MCP-ендпоінта (Caddy роутить сюди), як /brain і /media.
@@ -735,6 +737,15 @@ def _transport_security(port: int):
     )
 
 
+# Токен `elf` приймаємо лише з loopback і лише для цих тулів (+ усі `elf_*`).
+_ELF_LOOPBACK = frozenset({"127.0.0.1", "::1"})
+_ELF_READ_TOOLS = frozenset({"list_tasks", "get_task", "board"})
+
+
+def _elf_tool_allowed(name) -> bool:
+    return isinstance(name, str) and (name.startswith("elf_") or name in _ELF_READ_TOOLS)
+
+
 def run_http() -> None:
     """HTTP (streamable-http) + bearer. Тільки tailnet — назовні НЕ виставляти."""
     import uvicorn
@@ -745,9 +756,34 @@ def run_http() -> None:
     if not token:
         sys.exit("TASKS_TOKEN не задано. Створи task-manager/.env з TASKS_TOKEN=<секрет>.")
 
+    # Другий, обмежений токен для раннера `elf` (опційно): див. _elf_tool_allowed / _ELF_LOOPBACK.
+    elf_token = os.environ.get("TASKS_ELF_TOKEN") or None
+
     host = os.environ.get("TASKS_HTTP_HOST", "127.0.0.1")
     port = int(os.environ.get("TASKS_HTTP_PORT", "8792"))
     bearer = "Bearer "
+
+    def same(given: str, secret: str) -> bool:
+        return hmac.compare_digest(given.encode(), secret.encode())
+
+    async def elf_denied(request, on_mcp_path: bool):
+        """403, якщо запит із токеном elf виходить за його права; None — можна далі."""
+        client = request.client.host if request.client else None
+        if client not in _ELF_LOOPBACK or not on_mcp_path:
+            return JSONResponse({"error": "forbidden"}, status_code=403)
+        # Права на рівні тула: MCP — це один HTTP-ендпоінт, імʼя тула лише в тілі JSON-RPC,
+        # тож перевіряємо тут, до MCP-сесії (тіло Starlette кешує й віддає далі).
+        if request.method == "POST":
+            try:
+                msgs = json.loads(await request.body())
+            except ValueError:
+                return None  # не JSON-RPC — MCP відхилить сам, тул не викличе
+            for m in msgs if isinstance(msgs, list) else [msgs]:
+                if isinstance(m, dict) and m.get("method") == "tools/call":
+                    name = (m.get("params") or {}).get("name")
+                    if not _elf_tool_allowed(name):
+                        return JSONResponse({"error": "forbidden"}, status_code=403)
+        return None
 
     async def auth(request, call_next):
         # Bearer вимагаємо лише на MCP-ендпоінті. Дашборд (/task-manager, /api/*) браузер відкриває
@@ -755,11 +791,21 @@ def run_http() -> None:
         # (перевірено: з домашньої LAN порт не відкривається). Тому інстанс НЕ МОЖНА
         # виставляти за Funnel — там ці маршрути стали б публічними.
         path = request.url.path
-        if path == TASKS_HTTP_PATH or path.startswith(TASKS_HTTP_PATH + "/"):
-            authz = request.headers.get("authorization", "")
-            ok = authz.startswith(bearer) and hmac.compare_digest(authz[len(bearer):], token)
-            if not ok:
-                return JSONResponse({"error": "unauthorized"}, status_code=401)
+        on_mcp_path = path == TASKS_HTTP_PATH or path.startswith(TASKS_HTTP_PATH + "/")
+        authz = request.headers.get("authorization", "")
+        given = authz[len(bearer):] if authz.startswith(bearer) else None
+        is_main = given is not None and same(given, token)
+        is_elf = (
+            not is_main and elf_token is not None and given is not None and same(given, elf_token)
+        )
+        if is_elf:
+            denied = await elf_denied(request, on_mcp_path)
+            if denied:
+                return denied
+            with as_client("elf"):
+                return await call_next(request)
+        if on_mcp_path and not is_main:
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
         return await call_next(request)
 
     app = mcp.streamable_http_app(

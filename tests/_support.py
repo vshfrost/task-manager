@@ -103,7 +103,7 @@ def request(app, method: str, path: str, **kw) -> Response:
 
 async def arequest(app, method: str, path: str, *, query: dict | None = None,
                    headers: dict | None = None, json_body=None, form: dict | None = None,
-                   raw: bytes | None = None) -> Response:
+                   raw: bytes | None = None, client: tuple[str, int] = ("127.0.0.1", 1)) -> Response:
     """Async-варіант: потрібен, коли запит іде всередині lifespan (MCP-сесії)."""
     hdrs = {k.lower(): v for k, v in (headers or {}).items()}
     body = b""
@@ -121,12 +121,20 @@ async def arequest(app, method: str, path: str, *, query: dict | None = None,
         type="http", asgi={"version": "3.0"}, http_version="1.1", method=method,
         scheme="http", path=path, raw_path=path.encode(),
         query_string=urlencode(query or {}).encode(), root_path="",
-        server=("127.0.0.1", 80), client=("127.0.0.1", 1),
+        server=("127.0.0.1", 80), client=client,
         headers=[(k.encode(), v.encode()) for k, v in hdrs.items()],
     )
     sent: list[dict] = []
 
+    consumed = False
+
     async def receive():
+        # Тіло віддаємо раз; далі — тиша (як живе з'єднання): SSE-відповіді MCP слухають
+        # receive на розрив і падають, коли їм знову дають http.request.
+        nonlocal consumed
+        if consumed:
+            await asyncio.Event().wait()
+        consumed = True
         return {"type": "http.request", "body": body, "more_body": False}
 
     async def send(message):
