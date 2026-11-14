@@ -304,6 +304,183 @@ class ReleaseTests(ElfCase):
         self.assertEqual(self.get(tid)["status"], "in_progress")
 
 
+class BlockTests(ElfCase):
+    def claimed_task(self, name="Задача", tags=("to-agent", "claude", "dev"), **kw) -> str:
+        return self.task(name, tags, status="in_progress", **kw)
+
+    def test_block_creates_blocker_for_admin_with_agent_tag_and_original_id(self):
+        tid = self.claimed_task()
+        self.s.block(tid, "потрібен доступ до сервера", "claude")
+        blockers = self.s.list_tasks(status="blockers")
+        self.assertEqual(len(blockers), 1)
+        b = blockers[0]
+        self.assertEqual(sorted(b["domains"]), ["claude", "to-admin"])
+        self.assertIn(tid, b["text"])
+        self.assertIn("потрібен доступ до сервера", b["text"])
+        self.assertTrue(b["title"] and len(b["title"]) <= 50)
+
+    def test_blocker_gets_the_codex_tag_when_codex_blocks(self):
+        tid = self.task("Для codex", ("to-agent", "codex"), status="in_progress")
+        self.s.block(tid, "нема прав", "codex")
+        self.assertEqual(sorted(self.blocker()["domains"]), ["codex", "to-admin"])
+        self.assertEqual(sorted(self.get(tid)["domains"]), ["blocked", "codex"])
+
+    def test_blocker_lives_in_the_same_project_as_the_original(self):
+        tid = self.claimed_task(project="alpha")
+        self.s.block(tid, "причина", "claude")
+        self.assertEqual(self.blocker()["file"], "projects/alpha.md")
+
+    def test_blocker_of_a_global_task_is_global(self):
+        tid = self.claimed_task()
+        self.s.block(tid, "причина", "claude")
+        self.assertEqual(self.blocker()["file"], "tasks.md")
+
+    def test_original_loses_to_agent_gains_blocked_and_agent_tag(self):
+        tid = self.task("Без агента", ("to-agent", "dev"), status="in_progress")
+        self.s.block(tid, "причина", "claude")
+        self.assertEqual(sorted(self.get(tid)["domains"]), ["blocked", "claude", "dev"])
+
+    def test_original_goes_first_in_todo(self):
+        first = self.task("Інша 1", ("dev",))
+        second = self.task("Інша 2", ("dev",))
+        tid = self.claimed_task()
+        self.s.block(tid, "причина", "claude")
+        self.assertEqual(self.get(tid)["status"], "todo")
+        self.assertEqual(self.ids("todo"), [tid, first, second])
+
+    def test_blocked_original_is_not_claimed_again(self):
+        tid = self.claimed_task()
+        self.s.block(tid, "причина", "claude")
+        self.assertIsNone(self.s.claim("claude"))
+        self.assertEqual(self.get(tid)["status"], "todo")
+
+    def test_reason_is_written_to_the_elf_section_of_the_original_plan(self):
+        tid = self.claimed_task(plan="# План\n")
+        self.s.block(tid, "потрібен ключ", "claude")
+        self.assertEqual(
+            self.plan(tid),
+            f"# План\n\n## Elf\n- {TODAY} block (claude): потрібен ключ\n",
+        )
+
+    def test_reason_is_recorded_in_history_of_both_tasks(self):
+        tid = self.claimed_task()
+        self.s.block(tid, "потрібен ключ", "claude")
+        orig = self.history_of(tid, "elf_block")
+        self.assertEqual(len(orig), 1)
+        self.assertIn("потрібен ключ", json.dumps(orig[0], ensure_ascii=False))
+        created = self.history_of(self.blocker()["id"], "elf_block")
+        self.assertEqual([r["op"] for r in created], ["add"])
+
+    def test_block_returns_both_tasks(self):
+        tid = self.claimed_task()
+        res = self.s.block(tid, "причина", "claude")
+        self.assertEqual((res["task"].get("id"), res["task"].get("status")), (tid, "todo"))
+        self.assertEqual((res["blocker"] or {}).get("status"), "blockers")
+
+    def test_multiline_reason_is_collapsed_in_blocker_text(self):
+        tid = self.claimed_task()
+        self.s.block(tid, "рядок 1\nрядок 2", "claude")
+        self.assertIn("рядок 1 рядок 2", self.blocker()["text"])
+
+    def test_block_unknown_id_is_an_error(self):
+        with self.assertRaises(PlannerError):
+            self.s.block("nope00", "причина", "claude")
+
+    def test_block_task_not_in_progress_is_an_error_and_creates_nothing(self):
+        tid = self.task("У todo", ("to-agent", "claude"))
+        with self.assertRaises(PlannerError):
+            self.s.block(tid, "причина", "claude")
+        self.assertEqual(self.s.list_tasks(status="blockers"), [])
+        self.assertIn("to-agent", self.get(tid)["domains"])
+
+    def test_block_requires_a_reason_and_a_known_agent(self):
+        tid = self.claimed_task()
+        with self.assertRaises(PlannerError):
+            self.s.block(tid, "", "claude")
+        with self.assertRaises(PlannerError):
+            self.s.block(tid, "причина", "gemini")
+        self.assertEqual(self.s.list_tasks(status="blockers"), [])
+        self.assertEqual(self.get(tid)["status"], "in_progress")
+
+
+class ElfToolsTests(ServerCase):
+    """Ті самі поведінки крізь MCP-інтерфейс (тексти відповідей, помилки як `⚠️`)."""
+
+    def setUp(self):
+        super().setUp()
+        for name in ("elf-state.json", "todo-order.json"):
+            (self.root / name).unlink(missing_ok=True)
+
+    def todo(self, name, domains="to-agent claude", **kw) -> str:
+        tid = self.add(text=name, title=name, domains=domains, **kw)
+        self.to_todo(tid)
+        return tid
+
+    def test_claim_on_empty_queue_says_no_tasks(self):
+        self.assertEqual(self.call("elf_claim", agent="claude"), "no tasks")
+
+    def test_claim_reports_id_title_text_plan_and_failures(self):
+        tid = self.todo("Зробити X", plan="# План\n- крок 1")
+        out = self.call("elf_claim", agent="claude")
+        self.assertTrue(out.startswith("✅"), out)
+        for part in (f"`{tid}`", "Зробити X", "# План\n- крок 1", "Невдач: 0"):
+            self.assertIn(part, out)
+        self.assertIn("[in progress]", self.call("get_task", id=tid))
+
+    def test_claim_skips_other_agents_task(self):
+        self.todo("Для codex", domains="to-agent codex")
+        self.assertEqual(self.call("elf_claim", agent="claude"), "no tasks")
+
+    def test_release_returns_task_to_the_top_and_counts_failure(self):
+        tid = self.todo("Задача")
+        self.call("elf_claim", agent="claude")
+        out = self.call("elf_release", id=tid, reason="нема мережі", agent="claude")
+        self.assertTrue(out.startswith("✅"), out)
+        self.assertIn("Невдач: 1", out)
+        self.assertIn("[to do]", self.call("get_task", id=tid))
+        self.assertIn("нема мережі", self.call("get_task", id=tid))
+
+    def test_fifth_release_reports_the_block(self):
+        tid = self.todo("Задача")
+        self.call("elf_claim", agent="claude")
+        (self.root / "elf-state.json").write_text(
+            json.dumps({tid: {"failures": 4}}), encoding="utf-8"
+        )
+        out = self.call("elf_release", id=tid, reason="знову", agent="claude")
+        self.assertIn("Заблоковано", out)
+        self.assertIn("5 невдач: знову", self.call("list_tasks", status="blockers"))
+
+    def test_block_reports_the_blocker_id(self):
+        tid = self.todo("Задача")
+        self.call("elf_claim", agent="claude")
+        out = self.call("elf_block", id=tid, reason="потрібен ключ", agent="claude")
+        self.assertTrue(out.startswith("⛔"), out)
+        self.assertIn(f"`{tid}`", out)
+        blockers = self.call("list_tasks", status="blockers")
+        self.assertIn("#to-admin", self.call("get_task", id=blockers.split("`")[1]))
+
+    def test_unknown_id_and_task_not_in_progress_are_errors(self):
+        tid = self.todo("У todo")
+        for tool in ("elf_release", "elf_block"):
+            for bad in ("nope00", tid):
+                with self.subTest(tool=tool, id=bad):
+                    out = self.call(tool, id=bad, reason="причина", agent="claude")
+                    self.assertTrue(out.startswith("⚠️"), out)
+
+    def test_unknown_agent_is_an_error_for_every_tool(self):
+        tid = self.todo("Задача")
+        self.call("elf_claim", agent="claude")
+        for tool, args in (("elf_claim", {}), ("elf_release", {"id": tid, "reason": "r"}),
+                           ("elf_block", {"id": tid, "reason": "r"})):
+            with self.subTest(tool=tool):
+                out = self.call(tool, agent="gemini", **args)
+                self.assertTrue(out.startswith("⚠️"), out)
+
+    def test_backlog_to_todo_over_mcp_is_still_forbidden(self):
+        tid = self.add(domains="to-agent claude")
+        self.assertTrue(self.call("move_task", id=tid, status="todo").startswith("⚠️"))
+        self.assertEqual(self.call("elf_claim", agent="claude"), "no tasks")
+
 
 if __name__ == "__main__":
     unittest.main()
