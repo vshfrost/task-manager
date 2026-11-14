@@ -33,7 +33,7 @@ from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
 
 from planner_history import as_client
-from planner_store import MAX_IN_PROGRESS, UNSET, PlannerError, PlannerStore
+from planner_store import ELF_MAX_FAILURES, MAX_IN_PROGRESS, UNSET, PlannerError, PlannerStore
 
 # Людяний шлях MCP-ендпоінта (Caddy роутить сюди), як /brain і /media.
 TASKS_HTTP_PATH = os.environ.get("TASKS_HTTP_PATH", "/tasks")
@@ -541,7 +541,7 @@ def _elf_failed_text(r: dict) -> str:
     """Відповідь, коли задача повернулась у To Do з +1 невдачею (release / red CI / return)."""
     if r["blocker"]:
         return (
-            f"⛔ Заблоковано після {r['failures']} невдач: `{r['task']['id']}`; "
+            f"⛔ Заблоковано після {ELF_MAX_FAILURES} невдач: `{r['task']['id']}`; "
             f"блокер для адміна `{r['blocker']['id']}`"
         )
     return f"✅ Повернуто в to do (перша): `{r['task']['id']}` · Невдач: {r['failures']}"
@@ -571,7 +571,7 @@ def elf_claim(agent: str) -> str:
 def elf_release(id: str, reason: str, agent: str) -> str:
     """Агент повертає задачу, яку не зміг зробити: in_progress → перша в To Do, лічильник
     невдач +1, причина — у журнал і в розділ `## Elf` плану. agent = claude|codex.
-    П'ята невдача підряд блокує задачу так само, як elf_block."""
+    Третя невдача підряд блокує задачу так само, як elf_block."""
     try:
         r = store.release(id.strip(), reason, agent.strip())
     except PlannerError as e:
@@ -609,7 +609,7 @@ def elf_submit(id: str, agent: str, pr: str = "") -> str:
 def elf_ci(id: str, result: str) -> str:
     """Результат CI для задачі в in_review: result = green|red. green — запам'ятати (задача
     з'явиться в elf_review_next). red — задача стає першою в To Do, лічильник невдач +1,
-    рядок у `## Elf` плану; п'ята невдача блокує задачу так само, як elf_block."""
+    рядок у `## Elf` плану; третя невдача блокує задачу так само, як elf_block."""
     try:
         r = store.ci(id.strip(), result.strip())
     except PlannerError as e:
@@ -649,7 +649,7 @@ def elf_merged(id: str) -> str:
 def elf_return(id: str, comment: str, agent: str) -> str:
     """Рев'юер повертає задачу з правками: in_review → перша в To Do, лічильник невдач +1,
     коментар дописується в `## Elf` плану, результат CI скидається. agent = claude|codex.
-    П'ята невдача підряд блокує задачу так само, як elf_block."""
+    Третя невдача підряд блокує задачу так само, як elf_block."""
     try:
         r = store.send_back(id.strip(), comment, agent.strip())
     except PlannerError as e:

@@ -91,7 +91,7 @@ TODO_ORDER_FILENAME = "todo-order.json"
 # Робочий цикл Elf: агенти, поріг невдач, службові теги (теги задачі — це її `domains`).
 ELF_STATE_FILENAME = "elf-state.json"
 ELF_AGENTS = ("claude", "codex")
-ELF_MAX_FAILURES = 5
+ELF_MAX_FAILURES = 3
 ELF_TAG_QUEUE, ELF_TAG_BLOCKED, ELF_TAG_ADMIN = "to-agent", "blocked", "to-admin"
 ELF_TAG_DEV = "dev"
 ELF_CI_RESULTS = ("green", "red")
@@ -800,7 +800,7 @@ class PlannerStore:
 
     def release(self, task_id: str, reason: str, agent: str) -> dict:
         """in_progress → нагору To Do, невдач +1, причина — в журнал і в `## Elf` плану.
-        На 5-й невдачі замість цього — block (причина «5 невдач: …»)."""
+        На 3-й невдачі замість цього — block (причина «3 невдач: …»)."""
         _check_agent(agent)
         reason = _elf_reason(reason)
         with self._lock:
@@ -814,17 +814,19 @@ class PlannerStore:
         *, tool: str,
     ) -> dict:
         """Спільне для release / red CI / return під уже взятим замком: невдач +1 (старий
-        результат CI скидається), задача нагору To Do; 5-та невдача — block."""
+        результат CI скидається), задача нагору To Do; 3-тя невдача — block, лічильник
+        після блоку скидається в 0."""
         state = self._read_elf_state()
         was = _failures(state, task.id)
         failures = was + 1
         entry = {k: v for k, v in state.get(task.id, {}).items() if k != "ci"}
-        state[task.id] = {**entry, "failures": failures}
-        self._write_elf_state(state)
         blocker = None
         if failures >= ELF_MAX_FAILURES:
             reason = f"{ELF_MAX_FAILURES} невдач: {reason}"
             blocker = _elf_blocker(task, reason, agent)
+            failures = 0  # будь-який блок скидає лічильник
+        state[task.id] = {**entry, "failures": failures}
+        self._write_elf_state(state)
         self._elf_return(
             store, task, "block" if blocker else kind, agent, reason,
             tool=tool, failures=(was, failures), blocker=blocker,
@@ -833,7 +835,8 @@ class PlannerStore:
 
     def block(self, task_id: str, reason: str, agent: str) -> dict:
         """Нова задача в blockers (`to-admin` + тег агента, той самий проєкт); оригінал:
-        −`to-agent`, +`blocked`, +тег агента, нагору To Do. Причина — і в `## Elf` плану."""
+        −`to-agent`, +`blocked`, +тег агента, нагору To Do. Причина — і в `## Elf` плану;
+        лічильник невдач скидається в 0."""
         _check_agent(agent)
         reason = _elf_reason(reason)
         with self._lock:
@@ -841,10 +844,16 @@ class PlannerStore:
             task = self._find(store, task_id)
             _require_in_progress(task)
             blocker = _elf_blocker(task, reason, agent)
+            state = self._read_elf_state()
+            was = _failures(state, task_id)
+            if was:
+                state[task_id] = {**state[task_id], "failures": 0}
+                self._write_elf_state(state)
             self._elf_return(
-                store, task, "block", agent, reason, tool="elf_block", blocker=blocker,
+                store, task, "block", agent, reason, tool="elf_block",
+                failures=(was, 0) if was else None, blocker=blocker,
             )
-            return self._elf_result(task, _failures(self._read_elf_state(), task_id), blocker)
+            return self._elf_result(task, 0, blocker)
 
     def submit(self, task_id: str, agent: str, pr: str = "") -> dict:
         """in_progress → in_review (задача з тегом `dev`, посилання на PR обов'язкове) або
@@ -870,7 +879,7 @@ class PlannerStore:
 
     def ci(self, task_id: str, result: str) -> dict:
         """Результат CI для задачі в in_review. green — лише запам'ятати (`ci` у стані);
-        red — як невдача: нагору To Do, невдач +1 (5-та блокує), рядок у `## Elf`."""
+        red — як невдача: нагору To Do, невдач +1 (3-тя блокує), рядок у `## Elf`."""
         if result not in ELF_CI_RESULTS:
             raise PlannerError(f"Невідомий результат CI '{result}'. Дозволено: {', '.join(ELF_CI_RESULTS)}")
         with self._lock:
@@ -915,7 +924,7 @@ class PlannerStore:
             return _with_plan(task.to_dict(), self._read_plan(task_id))
 
     def send_back(self, task_id: str, comment: str, agent: str) -> dict:
-        """Рев'юер повертає задачу: in_review → нагору To Do, невдач +1 (5-та блокує),
+        """Рев'юер повертає задачу: in_review → нагору To Do, невдач +1 (3-тя блокує),
         коментар — у `## Elf` плану; результат CI скидається."""
         _check_agent(agent)
         comment = _elf_reason(comment)
