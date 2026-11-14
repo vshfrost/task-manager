@@ -537,20 +537,51 @@ def edit_task(
 
 @mcp.tool(annotations=_WRITE, structured_output=False)
 def elf_claim(agent: str) -> str:
-    """Elf: взяти верхню задачу To Do для агента."""
-    return ""
+    """Агент бере собі верхню задачу To Do: agent = claude|codex.
+    Підходить перша в порядку колонки To Do задача з тегом to-agent, без тега blocked і з тегом
+    агента (без тегів claude/codex — вона для claude). Задача стає in_progress; у відповіді id,
+    заголовок, текст, план і лічильник невдач. Підходящих задач нема — відповідь `no tasks`."""
+    try:
+        t = store.claim(agent.strip())
+    except PlannerError as e:
+        return f"⚠️ {e}"
+    if t is None:
+        return "no tasks"
+    return (
+        f"✅ Взято: `{t['id']}` [in progress] {t.get('title') or t['text']}\n"
+        f"Текст: {t['text']}\n"
+        f"Невдач: {t['failures']}\n"
+        f"План:\n{t['plan'] or '—'}"
+    )
 
 
 @mcp.tool(annotations=_WRITE, structured_output=False)
 def elf_release(id: str, reason: str, agent: str) -> str:
-    """Elf: повернути задачу в To Do з причиною."""
-    return ""
+    """Агент повертає задачу, яку не зміг зробити: in_progress → перша в To Do, лічильник
+    невдач +1, причина — у журнал і в розділ `## Elf` плану. agent = claude|codex.
+    П'ята невдача підряд блокує задачу так само, як elf_block."""
+    try:
+        r = store.release(id.strip(), reason, agent.strip())
+    except PlannerError as e:
+        return f"⚠️ {e}"
+    if r["blocker"]:
+        return (
+            f"⛔ Заблоковано після {r['failures']} невдач: `{r['task']['id']}`; "
+            f"блокер для адміна `{r['blocker']['id']}`"
+        )
+    return f"✅ Повернуто в to do (перша): `{r['task']['id']}` · Невдач: {r['failures']}"
 
 
 @mcp.tool(annotations=_WRITE, structured_output=False)
 def elf_block(id: str, reason: str, agent: str) -> str:
-    """Elf: заблокувати задачу й завести блокер для адміна."""
-    return ""
+    """Агент не може рухатись без людини: у blockers створюється задача для адміна (теги
+    to-admin + агент, той самий проєкт, у тексті id оригіналу й причина); оригінал з in_progress
+    стає першою в To Do без тега to-agent, з тегами blocked + агент. agent = claude|codex."""
+    try:
+        r = store.block(id.strip(), reason, agent.strip())
+    except PlannerError as e:
+        return f"⚠️ {e}"
+    return f"⛔ Заблоковано: `{r['task']['id']}`; блокер для адміна `{r['blocker']['id']}`"
 
 
 @mcp.tool(annotations=_DESTRUCTIVE, structured_output=False)
