@@ -231,6 +231,101 @@ class ReviewNextTests(ReviewCase):
             self.s.review_next("gemini")
 
 
+class MergedTests(ReviewCase):
+    def test_merged_moves_in_review_to_testing_and_notes_it(self):
+        tid = self.in_review(green=True)
+        self.s.merged(tid)
+        self.assertEqual(self.status(tid), "testing")
+        self.assertIn(f"- {TODAY} merged", self.elf_section(tid))
+
+    def test_merged_works_without_green_ci(self):
+        tid = self.in_review()
+        self.s.merged(tid)
+        self.assertEqual(self.status(tid), "testing")
+
+    def test_merged_does_not_count_a_failure(self):
+        tid = self.in_review(green=True)
+        self.s.merged(tid)
+        self.assertEqual(self.status(tid), "testing")
+        self.assertIsNone(self.failures(tid))
+
+    def test_task_not_in_review_is_an_error_and_changes_nothing(self):
+        working = self.in_progress()
+        queued = self.task("У todo", ("to-agent", "dev", "claude"))
+        for tid in (working, queued, "nope00"):
+            with self.subTest(task=tid):
+                with self.assertRaises(PlannerError):
+                    self.s.merged(tid)
+        self.assertEqual(self.status(working), "in_progress")
+        self.assertEqual(self.status(queued), "todo")
+
+
+class ReturnTests(ReviewCase):
+    def test_return_puts_task_first_in_todo_and_counts_a_failure(self):
+        first = self.task("Інша", ("to-agent", "claude"))
+        tid = self.in_review(green=True)
+        self.s.send_back(tid, "перейменуй функцію", "claude")
+        self.assertEqual(self.status(tid), "todo")
+        self.assertEqual(self.ids("todo"), [tid, first])
+        self.assertEqual(self.failures(tid), 1)
+
+    def test_comment_is_appended_to_elf_section_in_one_line(self):
+        tid = self.in_review()
+        self.s.send_back(tid, "рядок 1\nрядок 2", "claude")
+        self.assertIn(f"- {TODAY} return (claude): рядок 1 рядок 2", self.elf_section(tid))
+
+    def test_ci_is_cleared_so_resubmitted_task_waits_for_green_again(self):
+        tid = self.in_review(green=True)
+        self.assertEqual(self.review_ids("claude"), [tid])
+        self.s.send_back(tid, "правки", "claude")
+        self.assertEqual(self.review_ids("claude"), [])
+        self.assertEqual(self.claimed("claude")["id"], tid)
+        self.s.submit(tid, "claude", PR2)
+        self.assertEqual(self.review_ids("claude"), [])
+        self.s.ci(tid, "green")
+        self.assertEqual(self.review_ids("claude"), [tid])
+        self.assertEqual(self.s.review_next("claude")[0]["pr"], PR2)
+
+    def test_fifth_failure_by_return_blocks_the_task(self):
+        tid = self.in_review(green=True)
+        self.seed_failures(tid, 4)
+        self.s.send_back(tid, "знову не те", "claude")
+        self.assertEqual(self.failures(tid), 5)
+        t = self.get(tid)
+        self.assertIn("blocked", t["domains"])
+        self.assertNotIn("to-agent", t["domains"])
+        blocker = self.blocker()
+        self.assertIn("to-admin", blocker["domains"])
+        self.assertIn(tid, blocker["text"])
+        self.assertIn("5 невдач: знову не те", blocker["text"])
+
+    def test_fourth_failure_by_return_does_not_block(self):
+        tid = self.in_review()
+        self.seed_failures(tid, 3)
+        self.s.send_back(tid, "правки", "claude")
+        self.assertEqual(self.failures(tid), 4)
+        self.assertEqual(self.s.list_tasks(status="blockers"), [])
+
+    def test_return_requires_a_comment_and_a_known_agent(self):
+        tid = self.in_review()
+        with self.assertRaises(PlannerError):
+            self.s.send_back(tid, "", "claude")
+        with self.assertRaises(PlannerError):
+            self.s.send_back(tid, "правки", "gemini")
+        self.assertEqual(self.status(tid), "in_review")
+        self.assertIsNone(self.failures(tid))
+
+    def test_task_not_in_review_is_an_error_and_changes_nothing(self):
+        working = self.in_progress()
+        queued = self.task("У todo", ("to-agent", "dev", "claude"))
+        for tid in (working, queued, "nope00"):
+            with self.subTest(task=tid):
+                with self.assertRaises(PlannerError):
+                    self.s.send_back(tid, "правки", "claude")
+        self.assertEqual(self.status(working), "in_progress")
+        self.assertIsNone(self.failures(working))
+
+
 class ReviewToolsTests(ServerCase):
     """Ті самі поведінки крізь MCP-інтерфейс (тексти відповідей, помилки як `⚠️`)."""
 
@@ -299,6 +394,49 @@ class ReviewToolsTests(ServerCase):
         self.assertTrue(self.call("elf_ci", id=reviewing, result="yellow").startswith("⚠️"))
         self.assertTrue(self.call("elf_ci", id="nope00", result="green").startswith("⚠️"))
         self.assertIn("[in review]", self.call("get_task", id=reviewing))
+
+    def test_merged_moves_to_testing(self):
+        tid = self.reviewing()
+        out = self.call("elf_merged", id=tid)
+        self.assertTrue(out.startswith("✅"), out)
+        self.assertIn("[testing]", self.call("get_task", id=tid))
+
+    def test_merged_of_task_not_in_review_is_an_error(self):
+        tid = self.working()
+        self.assertTrue(self.call("elf_merged", id=tid).startswith("⚠️"))
+        self.assertIn("[in progress]", self.call("get_task", id=tid))
+
+    def test_return_puts_task_back_with_comment_and_drops_it_from_review_next(self):
+        tid = self.reviewing(green=True)
+        out = self.call("elf_return", id=tid, comment="перейменуй функцію", agent="claude")
+        self.assertTrue(out.startswith("✅"), out)
+        self.assertIn("Невдач: 1", out)
+        got = self.call("get_task", id=tid)
+        self.assertIn("[to do]", got)
+        self.assertIn("перейменуй функцію", got)
+        self.assertEqual(self.call("elf_review_next", agent="claude"), "nothing to review")
+
+    def test_fifth_failure_reports_the_block(self):
+        tid = self.reviewing()
+        (self.root / "elf-state.json").write_text(
+            json.dumps({tid: {"failures": 4}}), encoding="utf-8"
+        )
+        out = self.call("elf_return", id=tid, comment="знову", agent="claude")
+        self.assertIn("Заблоковано", out)
+        blocker_id = self.call("list_tasks", status="blockers").split("`")[1]
+        self.assertIn("5 невдач: знову", self.call("get_task", id=blocker_id))
+
+    def test_unknown_agent_and_empty_comment_are_errors(self):
+        tid = self.reviewing()
+        for tool, args in (("elf_submit", {"id": tid, "pr": PR}),
+                           ("elf_return", {"id": tid, "comment": "c"}),
+                           ("elf_review_next", {})):
+            with self.subTest(tool=tool):
+                self.assertTrue(self.call(tool, agent="gemini", **args).startswith("⚠️"))
+        self.assertTrue(
+            self.call("elf_return", id=tid, comment="", agent="claude").startswith("⚠️")
+        )
+        self.assertIn("[in review]", self.call("get_task", id=tid))
 
 
 if __name__ == "__main__":
