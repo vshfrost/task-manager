@@ -326,6 +326,56 @@ class ReturnTests(ReviewCase):
         self.assertIsNone(self.failures(working))
 
 
+class BlockFromReviewTests(ReviewCase):
+    def test_block_from_in_review_puts_task_first_in_todo_and_creates_blocker(self):
+        first = self.task("Інша", ("to-agent", "claude"))
+        tid = self.in_review()
+        self.s.block(tid, "PR не знайдено", "claude")
+        self.assertEqual(self.status(tid), "todo")
+        self.assertEqual(self.ids("todo"), [tid, first])
+        self.assertEqual(sorted(self.get(tid)["domains"]), ["blocked", "claude", "dev"])
+        blockers = self.s.list_tasks(status="blockers")
+        self.assertEqual(len(blockers), 1)
+        self.assertEqual(sorted(blockers[0]["domains"]), ["claude", "to-admin"])
+        self.assertIn(tid, blockers[0]["text"])
+
+    def test_green_ci_result_is_dropped_so_blocked_task_is_not_reviewed(self):
+        tid = self.in_review(green=True)
+        self.assertEqual(self.review_ids("claude"), [tid])
+        self.s.block(tid, "PR не знайдено", "claude")
+        self.assertEqual(self.review_ids("claude"), [])
+        self.assertNotIn("ci", self.state(tid))
+
+    def test_stored_pr_link_survives_the_block(self):
+        tid = self.in_review()
+        self.s.block(tid, "потрібна людина", "claude")
+        self.assertEqual(self.state(tid).get("pr"), PR)
+
+    def test_failure_counter_is_reset_by_block_from_in_review(self):
+        tid = self.in_review(green=True)
+        (self.root / "elf-state.json").write_text(
+            json.dumps({tid: {"failures": 2, "pr": PR, "ci": "green"}}), encoding="utf-8"
+        )
+        self.s.block(tid, "потрібна людина", "claude")
+        self.assertEqual(self.failures(tid), 0)
+
+    def test_block_from_testing_or_todo_is_an_error_naming_the_allowed_statuses(self):
+        for status in ("todo", "testing"):
+            with self.subTest(status=status):
+                tid = self.task(f"У {status}", ("to-agent", "claude"), status=status)
+                with self.assertRaises(PlannerError) as ctx:
+                    self.s.block(tid, "причина", "claude")
+                self.assertIn("in_progress", str(ctx.exception))
+                self.assertIn("in_review", str(ctx.exception))
+        self.assertEqual(self.s.list_tasks(status="blockers"), [])
+
+    def test_release_of_in_review_task_is_still_refused(self):
+        tid = self.in_review()
+        with self.assertRaises(PlannerError):
+            self.s.release(tid, "причина", "claude")
+        self.assertEqual(self.status(tid), "in_review")
+
+
 class ReviewToolsTests(ServerCase):
     """Ті самі поведінки крізь MCP-інтерфейс (тексти відповідей, помилки як `⚠️`)."""
 
