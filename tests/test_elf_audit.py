@@ -42,7 +42,7 @@ class AuditToolTests(ServerCase):
         full = self.tm.store.get_task(t["id"])
         self.assertEqual(full["status"], "backlog")
         self.assertEqual(full["title"], TITLE)
-        self.assertEqual(full["project"], "elf")
+        self.assertEqual(full["file"], "projects/elf.md")
         self.assertIn("to-admin", full["domains"])
         self.assertEqual(full["plan"].strip(), f"- {PR1}\n- {PR2}")
         self.assertIn("2 PR", full["text"])
