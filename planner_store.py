@@ -836,18 +836,21 @@ class PlannerStore:
     def block(self, task_id: str, reason: str, agent: str) -> dict:
         """Нова задача в blockers (`to-admin` + тег агента, той самий проєкт); оригінал:
         −`to-agent`, +`blocked`, +тег агента, нагору To Do. Причина — і в `## Elf` плану;
-        лічильник невдач скидається в 0."""
+        лічильник невдач скидається в 0. Можна з in_progress і з in_review (ci-watch не знайшов
+        PR); збережений результат CI скидається, посилання на PR лишається."""
         _check_agent(agent)
         reason = _elf_reason(reason)
         with self._lock:
             store = self._load()
             task = self._find(store, task_id)
-            _require_in_progress(task)
+            _require_blockable(task)
             blocker = _elf_blocker(task, reason, agent)
             state = self._read_elf_state()
             was = _failures(state, task_id)
-            if was:
-                state[task_id] = {**state[task_id], "failures": 0}
+            if was or "ci" in state.get(task_id, {}):
+                state[task_id] = {
+                    **{k: v for k, v in state[task_id].items() if k != "ci"}, "failures": 0,
+                }
                 self._write_elf_state(state)
             self._elf_return(
                 store, task, "block", agent, reason, tool="elf_block",
@@ -1087,6 +1090,13 @@ def _require_in_progress(task: Task) -> None:
     if task.status != "in_progress":
         raise PlannerError(
             f"Задача `{task.id}` у статусі {task.status}: повернути чи заблокувати можна лише in_progress"
+        )
+
+
+def _require_blockable(task: Task) -> None:
+    if task.status not in ("in_progress", "in_review"):
+        raise PlannerError(
+            f"Задача `{task.id}` у статусі {task.status}: заблокувати можна лише з in_progress або in_review"
         )
 
 
