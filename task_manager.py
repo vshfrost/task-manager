@@ -669,6 +669,12 @@ def elf_escalate(id: str, reason: str, agent: str) -> str:
     return f"✅ Передано адміну (лишається в in review): `{t['id']}`"
 
 
+@mcp.tool(annotations=_WRITE, structured_output=False)
+def elf_audit(week: str, prs: list[str]) -> str:
+    """Заглушка (TDD): аудит Elf тижня."""
+    return ""
+
+
 @mcp.tool(annotations=_DESTRUCTIVE, structured_output=False)
 def delete_task(id: str) -> str:
     """Видалити задачу за id (безповоротно з файлу planner)."""
