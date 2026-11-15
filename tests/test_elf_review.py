@@ -362,7 +362,10 @@ class BlockFromReviewTests(ReviewCase):
     def test_block_from_testing_or_todo_is_an_error_naming_the_allowed_statuses(self):
         for status in ("todo", "testing"):
             with self.subTest(status=status):
-                tid = self.task(f"У {status}", ("to-agent", "claude"), status=status)
+                tid = self.task(f"У {status}", ("to-agent", "claude"))
+                if status == "testing":
+                    self.s.move_task(tid, "in_progress")
+                    self.s.move_task(tid, "testing")
                 with self.assertRaises(PlannerError) as ctx:
                     self.s.block(tid, "причина", "claude")
                 self.assertIn("in_progress", str(ctx.exception))
