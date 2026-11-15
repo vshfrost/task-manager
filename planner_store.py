@@ -97,6 +97,9 @@ ELF_TAG_DEV = "dev"
 ELF_CI_RESULTS = ("green", "red")
 _ELF_HEADING_RE = re.compile(r"^## Elf[ \t]*$", re.M)
 _NEXT_HEADING_RE = re.compile(r"^#{1,2} ", re.M)
+_AUDIT_WEEK_RE = re.compile(r"^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$")
+_AUDIT_PR_RE = re.compile(r"^https://github\.com/[\w.-]+/[\w.-]+/pull/\d+$")
+AUDIT_MAX_PRS = 50
 
 
 def _check_position(position: int | None) -> None:
@@ -142,6 +145,7 @@ class PlannerStore:
     def __init__(self, root: Path | None = None):
         self.root = Path(root) if root else PLANNER_ROOT
         self._lock = threading.Lock()
+        self._audit_lock = threading.Lock()  # перевірка «вже є» + створення — одним кроком
         self.history = HistoryLog(self.root)
 
     # --- Внутрішнє: перелік керованих файлів --------------------------------
@@ -960,6 +964,33 @@ class PlannerStore:
                 changes={**diff(before, _with_plan(task.to_dict(), new_plan)), "elf": [None, line]},
             )
             return _with_plan(task.to_dict(), new_plan)
+
+    def audit(self, week: str, prs: list[str]) -> tuple[dict, bool]:
+        """Задача-нагадування «Аудит Elf тижня <week>» у backlog (проєкт elf, тег to-admin, у плані
+        список PR). Ідемпотентно за заголовком (будь-який статус): (задача, створена_чи_ні)."""
+        if not isinstance(week, str) or not _AUDIT_WEEK_RE.match(week):
+            raise PlannerError(f"Тиждень '{week}' не схожий на РРРР-Wнн (01–53), напр. 2026-W46")
+        urls = list(dict.fromkeys(prs or []))
+        if not urls:
+            raise PlannerError("Порожній список PR")
+        if len(urls) > AUDIT_MAX_PRS:
+            raise PlannerError(f"Забагато PR: {len(urls)} (максимум {AUDIT_MAX_PRS})")
+        for url in urls:
+            if not isinstance(url, str) or not _AUDIT_PR_RE.match(url):
+                raise PlannerError(f"'{url}' не схоже на URL PR (https://github.com/<owner>/<repo>/pull/<n>)")
+        title = f"Аудит Elf тижня {week}"
+        with self._audit_lock:
+            for t in self.list_tasks():
+                if t.get("title") == title:
+                    return t, False
+            created = self.add_task(
+                f"{title}: {len(urls)} PR (green audit + yellow без вибірки) — переглянь після мержу",
+                title=title,
+                project="elf",
+                domains=[ELF_TAG_ADMIN],
+                plan="\n".join(f"- {u}" for u in urls) + "\n",
+            )
+            return created, True
 
     def _elf_advance(
         self, store: dict[str, list[Block]], task: Task, status: str, line: str, *, tool: str
