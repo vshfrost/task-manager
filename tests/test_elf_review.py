@@ -491,6 +491,71 @@ class ReviewToolsTests(ServerCase):
         )
         self.assertIn("[in review]", self.call("get_task", id=tid))
 
+    def test_escalate_tool_reports_ok_and_hides_the_task_from_review_next(self):
+        tid = self.reviewing(green=True)
+        out = self.call("elf_escalate", id=tid, reason="червона", agent="claude")
+        self.assertTrue(out.startswith("✅"), out)
+        got = self.call("get_task", id=tid)
+        self.assertIn("[in review]", got)
+        self.assertIn("to-admin", got)
+        self.assertEqual(self.call("elf_review_next", agent="claude"), "nothing to review")
+
+    def test_escalate_tool_empty_reason_is_an_error(self):
+        tid = self.reviewing()
+        self.assertTrue(
+            self.call("elf_escalate", id=tid, reason="", agent="claude").startswith("⚠️")
+        )
+
+
+class EscalateTests(ReviewCase):
+    def tags(self, tid: str) -> list[str]:
+        return self.get(tid)["domains"]
+
+    def test_escalate_keeps_in_review_adds_to_admin_and_logs_the_reason(self):
+        tid = self.in_review(green=True)
+        self.s.escalate(tid, "red PR: зачіпає міграції", "claude")
+        self.assertEqual(self.status(tid), "in_review")
+        self.assertIn("to-admin", self.tags(tid))
+        self.assertIn(
+            f"- {TODAY} escalate (claude): red PR: зачіпає міграції", self.elf_section(tid)
+        )
+
+    def test_escalated_task_is_not_returned_by_review_next(self):
+        escalated = self.in_review("Ескальована", green=True)
+        other = self.in_review("Інша", green=True)
+        self.assertEqual(self.review_ids("claude"), [escalated, other])
+        self.s.escalate(escalated, "червона", "claude")
+        self.assertEqual(self.review_ids("claude"), [other])
+
+    def test_task_not_in_review_is_an_error_and_changes_nothing(self):
+        working = self.in_progress()
+        queued = self.task("У todo", ("to-agent", "dev", "claude"))
+        for tid in (working, queued, "nope00"):
+            with self.subTest(task=tid):
+                with self.assertRaises(PlannerError):
+                    self.s.escalate(tid, "причина", "claude")
+        for tid in (working, queued):
+            self.assertNotIn("to-admin", self.tags(tid))
+            self.assertIsNone(self.plan(tid))
+        self.assertEqual(self.status(working), "in_progress")
+        self.assertEqual(self.status(queued), "todo")
+
+    def test_failures_counter_is_unchanged(self):
+        tid = self.in_review(green=True)
+        self.seed_failures(tid, 1)
+        self.s.escalate(tid, "червона", "claude")
+        self.assertIn("to-admin", self.tags(tid))
+        self.assertEqual(self.failures(tid), 1)
+
+    def test_empty_reason_is_an_error_and_changes_nothing(self):
+        tid = self.in_review()
+        for reason in ("", "   "):
+            with self.subTest(reason=reason):
+                with self.assertRaises(PlannerError):
+                    self.s.escalate(tid, reason, "claude")
+        self.assertNotIn("to-admin", self.tags(tid))
+        self.assertEqual(self.status(tid), "in_review")
+
 
 if __name__ == "__main__":
     unittest.main()

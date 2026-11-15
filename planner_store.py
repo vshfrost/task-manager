@@ -905,7 +905,7 @@ class PlannerStore:
 
     def review_next(self, agent: str) -> list[dict]:
         """Лише читає: задачі in_review із зеленим CI для агента (без тегів агентів — claude),
-        у порядку in_review; у кожної id, title і посилання на PR."""
+        без тегу `to-admin`, у порядку in_review; у кожної id, title і посилання на PR."""
         _check_agent(agent)
         tasks = self.list_tasks(status="in_review")
         with self._lock:
@@ -915,6 +915,7 @@ class PlannerStore:
             {"id": t["id"], "title": t["title"] or t["text"], "pr": state[t["id"]].get("pr")}
             for t in tasks
             if state.get(t["id"], {}).get("ci") == "green" and _has_agent(by_id[t["id"]], agent)
+            and ELF_TAG_ADMIN not in by_id[t["id"]].domains
         ]
 
     def merged(self, task_id: str) -> dict:
@@ -936,6 +937,29 @@ class PlannerStore:
             task = self._find(store, task_id)
             _require_status(task, "in_review", "повернути з рев'ю")
             return self._elf_fail(store, task, "return", agent, comment, tool="elf_return")
+
+    def escalate(self, task_id: str, reason: str, agent: str) -> dict:
+        """Рев'юер віддає задачу Владу: лишається в in_review, +тег `to-admin` (review_next її
+        пропускає), причина — у `## Elf` плану; лічильник невдач і результат CI не чіпаємо."""
+        _check_agent(agent)
+        reason = _elf_reason(reason)
+        with self._lock:
+            store = self._load()
+            task = self._find(store, task_id)
+            _require_status(task, "in_review", "передати адміну")
+            old_plan = self._read_plan(task_id)
+            before = _with_plan(task.to_dict(), old_plan)
+            if ELF_TAG_ADMIN not in task.domains:
+                task.domains = [*task.domains, ELF_TAG_ADMIN]
+            line = f"escalate ({agent}): {reason}"
+            new_plan = _add_elf_line(old_plan, f"- {date.today().isoformat()} {line}")
+            self._write_plan(task_id, new_plan)
+            self._write_blocks(task.file, store[task.file])
+            self.history.record(
+                "edit", tool="elf_escalate", task_id=task_id, file=task.file,
+                changes={**diff(before, _with_plan(task.to_dict(), new_plan)), "elf": [None, line]},
+            )
+            return _with_plan(task.to_dict(), new_plan)
 
     def _elf_advance(
         self, store: dict[str, list[Block]], task: Task, status: str, line: str, *, tool: str

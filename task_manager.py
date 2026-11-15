@@ -625,7 +625,7 @@ def elf_ci(id: str, result: str) -> str:
 def elf_review_next(agent: str) -> str:
     """Що рев'юити: задачі в in_review із зеленим CI для агента (claude|codex; без тегів
     агентів — claude), у порядку колонки; у кожної id, заголовок і посилання на PR.
-    Нічого не змінює. Підходящих нема — відповідь `nothing to review`."""
+    Задачі з тегом to-admin пропускає. Нічого не змінює. Підходящих нема — відповідь `nothing to review`."""
     try:
         items = store.review_next(agent.strip())
     except PlannerError as e:
@@ -655,6 +655,18 @@ def elf_return(id: str, comment: str, agent: str) -> str:
     except PlannerError as e:
         return f"⚠️ {e}"
     return _elf_failed_text(r)
+
+
+@mcp.tool(annotations=_WRITE, structured_output=False)
+def elf_escalate(id: str, reason: str, agent: str) -> str:
+    """Рев'юер віддає задачу Владу (червоний PR, вибірковий жовтий): задача лишається в
+    in_review, отримує тег to-admin і зникає з elf_review_next; причина — рядок `escalate`
+    у `## Elf` плану. Лічильник невдач не змінюється. agent = claude|codex."""
+    try:
+        t = store.escalate(id.strip(), reason, agent.strip())
+    except PlannerError as e:
+        return f"⚠️ {e}"
+    return f"✅ Передано адміну (лишається в in review): `{t['id']}`"
 
 
 @mcp.tool(annotations=_DESTRUCTIVE, structured_output=False)

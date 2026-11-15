@@ -87,6 +87,14 @@ class ElfAllowedTests(TokenCase):
         self.assertIn(tid, self.text(self.tool(ELF, "elf_claim", {"agent": "claude"})))
         self.assertEqual(self.statuses()[tid], "in_progress")
 
+    def test_elf_token_from_loopback_may_escalate(self):
+        tid = self.seed(("to-agent", "dev"))
+        self.tm.store.move_task(tid, "in_progress")
+        self.tm.store.submit(tid, "claude", "https://github.com/example/repo/pull/7")
+        out = self.text(self.tool(ELF, "elf_escalate", {"id": tid, "reason": "red", "agent": "claude"}))
+        self.assertTrue(out.startswith("✅"), out)
+        self.assertIn("to-admin", self.tm.store.get_task(tid)["domains"])
+
     def test_elf_token_from_loopback_may_read(self):
         tid = self.seed()
         self.assertIn(tid, self.text(self.tool(ELF, "list_tasks")))
