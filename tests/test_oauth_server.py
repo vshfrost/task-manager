@@ -29,7 +29,7 @@ REDIRECT = "https://chatgpt.example/connector/oauth/cb"
 READ_ONLY = {"list_tasks", "get_task", "board", "history", "list_projects", "elf_review_next"}
 DESTRUCTIVE = {"edit_task", "delete_task"}
 IDEMPOTENT = {"move_task", "set_priority", "set_deadline"}
-ELF = {"elf_claim", "elf_release", "elf_block", "elf_submit", "elf_ci", "elf_merged", "elf_return"}  # пишуть, не ідемпотентні, не деструктивні
+ELF = {"elf_claim", "elf_release", "elf_block", "elf_submit", "elf_ci", "elf_merged", "elf_return", "elf_escalate"}  # пишуть, не ідемпотентні, не деструктивні
 
 
 class OAuthCase(ServerCase):
