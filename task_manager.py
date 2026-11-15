@@ -582,7 +582,7 @@ def elf_release(id: str, reason: str, agent: str) -> str:
 @mcp.tool(annotations=_WRITE, structured_output=False)
 def elf_block(id: str, reason: str, agent: str) -> str:
     """Агент не може рухатись без людини: у blockers створюється задача для адміна (теги
-    to-admin + агент, той самий проєкт, у тексті id оригіналу й причина); оригінал з in_progress
+    to-admin + агент, той самий проєкт, у тексті id оригіналу й причина); оригінал з in_progress або in_review
     стає першою в To Do без тега to-agent, з тегами blocked + агент. agent = claude|codex."""
     try:
         r = store.block(id.strip(), reason, agent.strip())
