@@ -937,6 +937,9 @@ class PlannerStore:
             _require_status(task, "in_review", "повернути з рев'ю")
             return self._elf_fail(store, task, "return", agent, comment, tool="elf_return")
 
+    def escalate(self, task_id: str, reason: str, agent: str) -> dict:
+        return {}
+
     def _elf_advance(
         self, store: dict[str, list[Block]], task: Task, status: str, line: str, *, tool: str
     ) -> None:

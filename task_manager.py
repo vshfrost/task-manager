@@ -657,6 +657,11 @@ def elf_return(id: str, comment: str, agent: str) -> str:
     return _elf_failed_text(r)
 
 
+@mcp.tool(annotations=_WRITE, structured_output=False)
+def elf_escalate(id: str, reason: str, agent: str) -> str:
+    return "⚠️ not implemented"
+
+
 @mcp.tool(annotations=_DESTRUCTIVE, structured_output=False)
 def delete_task(id: str) -> str:
     """Видалити задачу за id (безповоротно з файлу planner)."""
