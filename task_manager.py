@@ -671,8 +671,17 @@ def elf_escalate(id: str, reason: str, agent: str) -> str:
 
 @mcp.tool(annotations=_WRITE, structured_output=False)
 def elf_audit(week: str, prs: list[str]) -> str:
-    """Заглушка (TDD): аудит Elf тижня."""
-    return ""
+    """Аудит Elf за тиждень: задача в backlog (проєкт elf, тег to-admin) зі списком PR у плані.
+    week = РРРР-Wнн (01–53), напр. 2026-W46; prs = 1–50 URL вигляду
+    https://github.com/<owner>/<repo>/pull/<n> (дублікати зливаються). Задача цього тижня вже є
+    (будь-який статус) → повертає її id, нічого не змінює."""
+    try:
+        t, created = store.audit(week, prs)
+    except PlannerError as e:
+        return f"⚠️ {e}"
+    if created:
+        return f"✅ Аудит створено: `{t['id']}`"
+    return f"ℹ️ Аудит цього тижня вже є: `{t['id']}`"
 
 
 @mcp.tool(annotations=_DESTRUCTIVE, structured_output=False)
