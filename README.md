@@ -5,7 +5,7 @@ MCP-сервер керування задачами над доменом **`pl
 
 ## Що це
 - Парсер/серіалізатор planner-формату (round-trip: чіпає лише рядки-задачі, решту зберігає).
-- MCP-тули для Claude: `list_tasks` (без done за замовч., короткі рядки, `query`/`limit`), `get_task`, `board`, `add_task`, `move_task` (правила переходів + WIP-гард),
+- MCP-тули для Claude: `list_tasks` (без done за замовч., короткі рядки, `query`/`limit`) і `get_task` (обидва з `format=json` для машинних клієнтів), `comment_task` (коментар у `## Elf` плану), `board`, `add_task`, `move_task` (правила переходів + WIP-гард),
   `set_priority`, `set_deadline`, **`edit_task`** (будь-які поля + перенос між проєктами),
   `delete_task`, **`history`** (журнал змін).
 - Три транспорти: stdio · http+bearer (tailnet) · OAuth (публічно за Caddy/Funnel) — **Ф4 ✅**.
@@ -146,7 +146,7 @@ ChatGPT). Без токенів, кодів і `rid`.
 замовч. = issuer) і scope рівно `tasks`; `ResourceGuard` перевіряє `resource` на `/token`;
 refresh без розширення scope; прострочені й legacy-токени (без `resource`) вичищаються на
 старті — після оновлення з версії без resource-binding конектори треба перелогінити один раз.
-**Анотації тулів:** read-only — `board`, `list_tasks`, `get_task`, `history`; зміни — `add_task`,
+**Анотації тулів:** read-only — `board`, `list_tasks`, `get_task`, `history`; зміни — `add_task`, `comment_task`,
 `move_task`, `set_priority`, `set_deadline`; деструктивні (ChatGPT питає підтвердження) —
 `edit_task` (очищення полів, перенос між файлами) і `delete_task`.
 **Журнал:** правки з OAuth підписуються клієнтом токена — `vlad@chatgpt` / `vlad@claude`.
@@ -166,7 +166,8 @@ uv run task_manager.py                    # MCP-сервер (stdio)
 - `TASKS_TOKEN` — bearer-секрет (генеруєш САМ, §8).
 - `TASKS_ELF_TOKEN` — опційний другий bearer для раннера `elf` (генеруєш САМ, §8; порожньо = вимкнено).
   Лише на bearer-інстансі, лише з loopback (`127.0.0.1`/`::1`), лише тули `elf_*`, `list_tasks`,
-  `get_task`, `board`; решта тулів і дашборд → 403; зміни в журналі з клієнтом `elf`.
+  `get_task`, `board`, `move_task`, `comment_task` і `edit_task` лише з аргументами `id`/`domains`;
+  решта тулів і дашборд → 403; зміни в журналі з клієнтом `elf`.
   Задається в `/etc/task-manager/env` поруч із `TASKS_TOKEN` (`TASKS_ELF_TOKEN=<секрет>`), далі
   `sudo systemctl restart task-manager`. Раннер має ходити на `:8792` напряму: за reverse-проксі
   на тому ж хості перевірка loopback нічого не дає.
