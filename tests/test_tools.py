@@ -221,7 +221,7 @@ class InterfaceTests(ServerCase):
             "elf_review_next": {"agent"}, "elf_merged": {"id"},
             "elf_return": {"id", "comment", "agent"},
             "elf_escalate": {"id", "reason", "agent"},
-            "elf_audit": {"week", "prs"},
+            "elf_audit": {"week", "prs"}, "comment_task": {"id", "text"},
             "create_project": {"slug", "name"}, "list_projects": set(),
         }
         self.assertEqual(set(tools), set(required))

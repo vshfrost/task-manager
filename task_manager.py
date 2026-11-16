@@ -335,17 +335,44 @@ def _fmt_rec(r: dict) -> str:
     return "\n".join(lines)
 
 
+def _json_task(t: dict) -> dict:
+    """Задача для format=json: ті самі поля, що в текстовому виводі; project = слаг або 'global'."""
+    project = t["file"].replace("projects/", "").replace(".md", "") if t["file"] != "tasks.md" else "global"
+    return {
+        "id": t["id"], "title": t.get("title") or t["text"], "text": t["text"], "status": t["status"],
+        "priority": t["priority"], "deadline": t["deadline"], "energy": t["energy"],
+        "domains": t["domains"], "project": project, "links": t["links"],
+    }
+
+
+def _json_out(data: dict) -> str:
+    return json.dumps(data, ensure_ascii=False)
+
+
+def _json_format(fmt: str) -> bool | str:
+    """format тулів читання: '' → False (текст), 'json' → True; решта — текст помилки."""
+    fmt = (fmt or "").strip()
+    if fmt in ("", "json"):
+        return fmt == "json"
+    return f"Невідомий формат '{fmt}'. Дозволено: json (або порожньо — текст)"
+
+
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False), structured_output=False)
 def list_tasks(
     status: str = "", project: str = "", priority: str = "", domain: str = "",
-    query: str = "", limit: int = 50,
+    query: str = "", limit: int = 50, format: str = "",
 ) -> str:
     """Список задач із planner (короткі рядки: id, статус, заголовок, пріоритет, дедлайн, проєкт).
     Без status задачі done не показуються (внизу — скільки приховано); status=done — лише вони.
     Фільтри опційні: status = backlog|todo|blockers|in_progress|in_review|testing|done; project = слаг проєкту або 'global';
     priority = asap|high|low; domain = тег без '#'; query = підрядок у заголовку чи тексті.
     status=todo — у ручному порядку колонки To Do (зверху те, що брати першим), не за пріоритетом.
-    limit — скільки задач показати (за замовч. 50). Повний текст і links — get_task(id)."""
+    limit — скільки задач показати (за замовч. 50). Повний текст і links — get_task(id).
+    format="json" — замість тексту JSON-рядок {"tasks": [{id, title, text, status, priority, deadline,
+    energy, domains, project, links}], "more": N, "hidden_done": N}; помилка — {"error": "..."}."""
+    as_json = _json_format(format)
+    if isinstance(as_json, str):
+        return _json_out({"error": as_json})
     try:
         tasks = store.list_tasks(
             status=_none(status),
@@ -355,11 +382,17 @@ def list_tasks(
             query=_none(query),
         )
     except PlannerError as e:
-        return f"⚠️ {e}"
+        return _json_out({"error": str(e)}) if as_json else f"⚠️ {e}"
     hidden = 0
     if not _none(status):
         hidden = sum(1 for t in tasks if t["status"] == "done")
         tasks = [t for t in tasks if t["status"] != "done"]
+    if as_json:
+        cap = max(1, min(int(limit or 50), 500))
+        return _json_out({
+            "tasks": [_json_task(t) for t in tasks[:cap]],
+            "more": max(0, len(tasks) - cap), "hidden_done": hidden,
+        })
     notes = []
     if hidden:
         notes.append(f"(+{hidden} done приховано — `status=done`)")
@@ -374,12 +407,19 @@ def list_tasks(
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False), structured_output=False)
-def get_task(id: str) -> str:
-    """Одна задача повністю: текст, пріоритет, дедлайн, energy, domains, проєкт, links, plan."""
+def get_task(id: str, format: str = "") -> str:
+    """Одна задача повністю: текст, пріоритет, дедлайн, energy, domains, проєкт, links, plan.
+    format="json" — замість тексту JSON-рядок з полями задачі та "plan" (null, якщо плану нема);
+    помилка — {"error": "..."}."""
+    as_json = _json_format(format)
+    if isinstance(as_json, str):
+        return _json_out({"error": as_json})
     try:
         t = store.get_task(id.strip())
     except PlannerError as e:
-        return f"⚠️ {e}"
+        return _json_out({"error": str(e)}) if as_json else f"⚠️ {e}"
+    if as_json:
+        return _json_out({**_json_task(t), "plan": t.get("plan") or None})
     out = _fmt(t)
     if t["links"]:
         out += "\n🔗 " + ", ".join(t["links"])
@@ -483,6 +523,18 @@ def set_deadline(id: str, deadline: str) -> str:
     except PlannerError as e:
         return f"⚠️ {e}"
     return "✅ Оновлено: " + _fmt_short(t)
+
+
+@mcp.tool(annotations=_WRITE, structured_output=False)
+def comment_task(id: str, text: str) -> str:
+    """Додати коментар до задачі: рядок `РРРР-ММ-ДД текст` у розділі `## Elf` її плану
+    (розділу нема — створюється). Текст може бути багаторядковим, до 4000 символів; наступні
+    рядки йдуть з відступом. Статус і решту полів не змінює; запис потрапляє в history."""
+    try:
+        t = store.comment_task(id.strip(), text)
+    except PlannerError as e:
+        return f"⚠️ {e}"
+    return "✅ Коментар додано: " + _fmt_short(t)
 
 
 @mcp.tool(annotations=_DESTRUCTIVE, structured_output=False)
@@ -765,12 +817,19 @@ def _transport_security(port: int):
 
 
 # Токен `elf` приймаємо лише з loopback і лише для цих тулів (+ усі `elf_*`).
+# edit_task — лише з аргументами з _ELF_EDIT_ARGS (теги задачі), решта полів → 403.
 _ELF_LOOPBACK = frozenset({"127.0.0.1", "::1"})
 _ELF_READ_TOOLS = frozenset({"list_tasks", "get_task", "board"})
+_ELF_WRITE_TOOLS = frozenset({"move_task", "comment_task"})
+_ELF_EDIT_ARGS = frozenset({"id", "domains"})
 
 
-def _elf_tool_allowed(name) -> bool:
-    return isinstance(name, str) and (name.startswith("elf_") or name in _ELF_READ_TOOLS)
+def _elf_tool_allowed(name, args=None) -> bool:
+    if not isinstance(name, str):
+        return False
+    if name == "edit_task":
+        return isinstance(args, dict) and set(args) <= _ELF_EDIT_ARGS
+    return name.startswith("elf_") or name in _ELF_READ_TOOLS or name in _ELF_WRITE_TOOLS
 
 
 def run_http() -> None:
@@ -807,8 +866,8 @@ def run_http() -> None:
                 return None  # не JSON-RPC — MCP відхилить сам, тул не викличе
             for m in msgs if isinstance(msgs, list) else [msgs]:
                 if isinstance(m, dict) and m.get("method") == "tools/call":
-                    name = (m.get("params") or {}).get("name")
-                    if not _elf_tool_allowed(name):
+                    params = m.get("params") or {}
+                    if not _elf_tool_allowed(params.get("name"), params.get("arguments") or {}):
                         return JSONResponse({"error": "forbidden"}, status_code=403)
         return None
 
