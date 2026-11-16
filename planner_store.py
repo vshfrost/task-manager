@@ -100,6 +100,7 @@ _NEXT_HEADING_RE = re.compile(r"^#{1,2} ", re.M)
 _AUDIT_WEEK_RE = re.compile(r"^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$")
 _AUDIT_PR_RE = re.compile(r"^https://github\.com/[\w.-]+/[\w.-]+/pull/\d+$")
 AUDIT_MAX_PRS = 50
+COMMENT_MAX_CHARS = 4000
 
 
 def _check_position(position: int | None) -> None:
@@ -966,8 +967,28 @@ class PlannerStore:
             return _with_plan(task.to_dict(), new_plan)
 
     def comment_task(self, task_id: str, text: str) -> dict:
-        """Заглушка (червоні тести): нічого не пише."""
-        return self.get_task(task_id)
+        """Коментар у розділ `## Elf` плану: `- РРРР-ММ-ДД <перший рядок>`, решта рядків з
+        відступом у 2 пробіли (рядок `## x` у тексті не стає заголовком). Статус і поля не чіпає."""
+        text = (text or "").strip()
+        if not text:
+            raise PlannerError("Порожній коментар")
+        if len(text) > COMMENT_MAX_CHARS:
+            raise PlannerError(f"Коментар задовгий: {len(text)} символів (максимум {COMMENT_MAX_CHARS})")
+        first, *rest = text.splitlines()
+        indented = (f"  {ln}" if ln.strip() else "" for ln in rest)
+        block = "\n".join([f"- {date.today().isoformat()} {first}", *indented])
+        with self._lock:
+            store = self._load()
+            task = self._find(store, task_id)
+            old_plan = self._read_plan(task.id)
+            before = _with_plan(task.to_dict(), old_plan)
+            new_plan = _add_elf_line(old_plan, block)
+            self._write_plan(task.id, new_plan)
+            self.history.record(
+                "edit", tool="comment_task", task_id=task.id, file=task.file,
+                changes={**diff(before, _with_plan(task.to_dict(), new_plan)), "elf": [None, text]},
+            )
+            return _with_plan(task.to_dict(), new_plan)
 
     def audit(self, week: str, prs: list[str]) -> tuple[dict, bool]:
         """Задача-нагадування «Аудит Elf тижня <week>» у backlog (проєкт elf, тег to-admin, у плані

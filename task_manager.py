@@ -487,7 +487,9 @@ def set_deadline(id: str, deadline: str) -> str:
 
 @mcp.tool(annotations=_WRITE, structured_output=False)
 def comment_task(id: str, text: str) -> str:
-    """Додати коментар до задачі (заглушка)."""
+    """Додати коментар до задачі: рядок `РРРР-ММ-ДД текст` у розділі `## Elf` її плану
+    (розділу нема — створюється). Текст може бути багаторядковим, до 4000 символів; наступні
+    рядки йдуть з відступом. Статус і решту полів не змінює; запис потрапляє в history."""
     try:
         t = store.comment_task(id.strip(), text)
     except PlannerError as e:
