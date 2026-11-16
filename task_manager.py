@@ -48,7 +48,7 @@ INSTRUCTIONS = (
     "new tasks always go to backlog; moving into in_progress is capped at 15 (WIP limit). "
     "Transitions: into todo only from testing, in_progress, in_review or blockers "
     "(backlog to todo is not possible via MCP — only Vlad does it on the dashboard); "
-    "into blockers only from backlog, todo or testing; into in_progress only from todo; "
+    "into blockers only from backlog, todo, in_progress or testing; into in_progress only from todo; "
     "into in_review only from in_progress; into testing only from in_progress, in_review or blockers; "
     "into backlog and done from anywhere. "
     "A task returning to todo from in_progress or in_review goes to the top of the column, "
@@ -453,7 +453,7 @@ def add_task(
 def move_task(id: str, status: str) -> str:
     """Перемістити задачу в колонку: status = backlog|todo|blockers|in_progress|in_review|testing|done.
     Переходи: у todo — лише з testing, in_progress, in_review або blockers (backlog → todo через
-    MCP заборонено, це робить лише Влад на дашборді); у blockers — лише з backlog, todo або testing;
+    MCP заборонено, це робить лише Влад на дашборді); у blockers — лише з backlog, todo, in_progress або testing;
     у in_progress — лише з todo; у in_review — лише з in_progress; у testing — лише з in_progress,
     in_review або blockers; у backlog і done — звідки завгодно. З in_progress/in_review у todo
     задача стає першою в колонці, з testing/blockers — останньою.
@@ -506,7 +506,7 @@ def edit_task(
     НЕ можна очистити через 'none' (він обовʼязковий).
     Щоб ОЧИСТИТИ поле, передай 'none'. Значення: status = backlog|todo|blockers|in_progress|in_review|testing|done
     (переходи: у todo — лише з testing, in_progress, in_review або blockers; backlog → todo через
-    MCP заборонено, це робить лише Влад на дашборді; у blockers — лише з backlog, todo або testing;
+    MCP заборонено, це робить лише Влад на дашборді; у blockers — лише з backlog, todo, in_progress або testing;
     у in_progress — лише з todo; у in_review — лише з in_progress; у testing — лише з in_progress,
     in_review або blockers; у backlog і done — звідки завгодно);
     priority = asap|high|low; deadline = РРРР-ММ-ДД; energy = S|M|L; domains/links — через

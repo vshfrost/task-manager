@@ -41,7 +41,7 @@ STATUSES = ("backlog", "todo", "blockers", "in_progress", "in_review", "testing"
 # приймають задачу з будь-якого статусу.
 TRANSITION_SOURCES = {
     "todo": ("backlog", "testing", "in_progress", "in_review", "blockers"),
-    "blockers": ("backlog", "todo", "testing"),
+    "blockers": ("backlog", "todo", "in_progress", "testing"),
     "in_progress": ("todo",),
     "in_review": ("in_progress",),
     "testing": ("in_progress", "in_review", "blockers"),
