@@ -24,7 +24,7 @@ CHAR = {
 SOURCES = {
     "backlog": set(ALL),
     "todo": {"backlog", "testing", "in_progress", "in_review", "blockers"},
-    "blockers": {"backlog", "todo", "testing"},
+    "blockers": {"backlog", "todo", "in_progress", "testing"},
     "in_progress": {"todo"},
     "in_review": {"in_progress"},
     "testing": {"in_progress", "in_review", "blockers"},
@@ -172,6 +172,32 @@ class WipStillAppliesTests(unittest.TestCase):
         store = self.seed(14)
         self.assertEqual(moved(self, store, "in_progress")["status"], "in_progress")
         self.assertEqual(store.count_in_progress(), 15)
+
+
+class InProgressToBlockersTests(ServerCase):
+    def seed(self, status: str) -> None:
+        (self.root / "tasks.md").write_text(planner_text(status), encoding="utf-8")
+
+    def test_move_task_in_progress_to_blockers(self):
+        self.seed("in_progress")
+        self.assertIn("[blockers]", self.call("move_task", id=TID, status="blockers"))
+
+    def test_edit_task_status_in_progress_to_blockers(self):
+        self.seed("in_progress")
+        self.assertIn("[blockers]", self.call("edit_task", id=TID, status="blockers"))
+
+    def test_in_review_to_blockers_is_still_forbidden(self):
+        self.seed("in_review")
+        self.assertIn("Перехід in_review → blockers заборонено", self.call("move_task", id=TID, status="blockers"))
+
+    def test_wip_count_drops_by_one_after_the_move(self):
+        self.seed("in_progress")
+        self.assertIn("in progress: 1/15", self.call("board").splitlines()[0])
+        self.call("move_task", id=TID, status="blockers")
+        self.assertIn("in progress: 0/15", self.call("board").splitlines()[0])
+
+    def test_instructions_name_in_progress_among_blockers_sources(self):
+        self.assertIn("into blockers only from backlog, todo, in_progress or testing", self.tm.INSTRUCTIONS)
 
 
 class ToolTransitionTests(ServerCase):

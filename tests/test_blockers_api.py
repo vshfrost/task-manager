@@ -126,7 +126,7 @@ class McpBoardAndDocsTests(ServerCase):
     def test_instructions_and_tool_docs_describe_blockers_and_new_transitions(self):
         ins = self.tm.INSTRUCTIONS
         self.assertIn("backlog | todo | blockers | in_progress | in_review | testing | done", ins)
-        self.assertIn("into blockers only from backlog, todo or testing", ins)
+        self.assertIn("into blockers only from backlog, todo, in_progress or testing", ins)
         self.assertIn("into testing only from in_progress, in_review or blockers", ins)
         self.assertIn("into todo only from testing, in_progress, in_review or blockers", ins)
         self.assertIn("backlog to todo is not possible via MCP", ins)
@@ -184,13 +184,22 @@ class WebBlockersTests(WebCase):
         self.assertEqual(self.edit(b, "todo").status_code, 200)
         self.assertEqual(self.listed(), [a, b])
 
-    def test_forbidden_drop_into_blockers_is_400(self):
+    def test_dashboard_in_progress_to_blockers_is_allowed(self):
         tid = self.add()["id"]
         self.edit(tid, "todo")
         self.edit(tid, "in_progress")
         r = self.edit(tid, "blockers")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["task"]["status"], "blockers")
+
+    def test_forbidden_drop_into_blockers_is_400(self):
+        tid = self.add()["id"]
+        self.edit(tid, "todo")
+        self.edit(tid, "in_progress")
+        self.edit(tid, "in_review")
+        r = self.edit(tid, "blockers")
         self.assertEqual(r.status_code, 400, r.text)
-        self.assertIn("Перехід in_progress → blockers заборонено", r.json()["error"])
+        self.assertIn("Перехід in_review → blockers заборонено", r.json()["error"])
 
 
 if __name__ == "__main__":

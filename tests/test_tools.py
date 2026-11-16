@@ -184,7 +184,7 @@ class InterfaceTests(ServerCase):
 
     def test_instructions_state_the_transition_rules(self):
         for rule in ("into todo only from testing, in_progress, in_review or blockers",
-                     "into blockers only from backlog, todo or testing",
+                     "into blockers only from backlog, todo, in_progress or testing",
                      "into in_progress only from todo",
                      "into in_review only from in_progress",
                      "into testing only from in_progress, in_review or blockers",
@@ -202,7 +202,7 @@ class InterfaceTests(ServerCase):
             with self.subTest(tool=name):
                 for rule in ("у todo — лише з testing, in_progress, in_review або blockers",
                              "backlog → todo через MCP заборонено",
-                             "у blockers — лише з backlog, todo або testing",
+                             "у blockers — лише з backlog, todo, in_progress або testing",
                              "у in_progress — лише з todo", "у in_review — лише з in_progress",
                              "у testing — лише з in_progress, in_review або blockers",
                              "у backlog і done — звідки завгодно"):
