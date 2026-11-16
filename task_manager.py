@@ -338,7 +338,7 @@ def _fmt_rec(r: dict) -> str:
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False), structured_output=False)
 def list_tasks(
     status: str = "", project: str = "", priority: str = "", domain: str = "",
-    query: str = "", limit: int = 50,
+    query: str = "", limit: int = 50, format: str = "",
 ) -> str:
     """Список задач із planner (короткі рядки: id, статус, заголовок, пріоритет, дедлайн, проєкт).
     Без status задачі done не показуються (внизу — скільки приховано); status=done — лише вони.
@@ -374,7 +374,7 @@ def list_tasks(
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False), structured_output=False)
-def get_task(id: str) -> str:
+def get_task(id: str, format: str = "") -> str:
     """Одна задача повністю: текст, пріоритет, дедлайн, energy, domains, проєкт, links, plan."""
     try:
         t = store.get_task(id.strip())
