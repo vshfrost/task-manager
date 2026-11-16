@@ -115,6 +115,18 @@ class ColumnsTests(WebCase):
     def test_grid_fits_seven_columns(self):
         self.assertIn("grid-template-columns:repeat(7,minmax(0,1fr))", self.page())
 
+    def test_card_shows_task_id_chip(self):
+        self.assertIn('chip(t.id, "id")', self.page())
+
+    def test_id_chip_goes_first_in_meta(self):
+        page = self.page()
+        self.assertLess(page.index('chip(t.id, "id")'), page.index("chip(PRIO["))
+
+    def test_id_chip_text_is_selectable(self):
+        page = self.page()
+        self.assertIn(".chip.id{", page)
+        self.assertIn("user-select:text", page)
+
 
 class ManyTests(WebCase):
     def test_filters(self):

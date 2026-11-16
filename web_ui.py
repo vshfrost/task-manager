@@ -355,6 +355,7 @@ PAGE = r"""<!doctype html>
              display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
   .meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;font-size:11.5px;color:var(--muted)}
   .chip{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:1px 8px}
+  .chip.id{font-family:ui-monospace,monospace;user-select:text;cursor:text}
   .chip.late{background:#d3332218;color:var(--danger);border-color:#d3332255}
   /* Колір тега (налаштування 🎨): задається змінною --tag-color лише коли він є. */
   .chip.tagged{background:color-mix(in srgb,var(--tag-color) 18%,transparent);
@@ -650,6 +651,7 @@ function card(t){
     c.className = "chip" + (cls ? " " + cls : ""); c.textContent = txt;
     if (color){ c.classList.add("tagged"); c.style.setProperty("--tag-color", color); }
     m.appendChild(c); };
+  chip(t.id, "id");
   if (t.priority) chip(PRIO[t.priority] + " " + t.priority);
   if (t.deadline) chip("📅 " + t.deadline, (t.deadline < today() && t.status !== "done") ? "late" : "");
   if (t.energy) chip("⚡" + t.energy);
