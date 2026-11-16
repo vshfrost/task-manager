@@ -1,7 +1,8 @@
 """Bearer-інстанс: другий, обмежений токен `elf` (TASKS_ELF_TOKEN).
 
-Токен elf: лише з loopback; з MCP-тулів — `elf_*`, `list_tasks`, `get_task`, `board`; дашборд
-і решта тулів → 403. Зміни під ним у журналі з клієнтом `elf`. Головний токен — без змін.
+Токен elf: лише з loopback; з MCP-тулів — `elf_*`, `list_tasks`, `get_task`, `board`,
+`move_task`, `comment_task` і `edit_task` лише з аргументами з {id, domains}; дашборд і решта
+тулів → 403. Зміни під ним у журналі з клієнтом `elf`. Головний токен — без змін.
 
 Запуск: uv run python -m unittest tests.test_elf_token -v
 """
@@ -105,22 +106,63 @@ class ElfAllowedTests(TokenCase):
         self.seed()
         self.assertTrue(self.text(self.tool(ELF, "board", client=("::1", 1))))
 
+    def test_elf_token_may_move_task(self):
+        tid = self.seed()
+        out = self.text(self.tool(ELF, "move_task", {"id": tid, "status": "in_progress"}))
+        self.assertTrue(out.startswith("✅"), out)
+        self.assertEqual(self.statuses()[tid], "in_progress")
+
+    def test_elf_token_move_task_follows_transition_rules(self):
+        tid = self.tm.store.add_task("Fixture task", title="Fixture task", domains=["to-agent"])["id"]
+        out = self.text(self.tool(ELF, "move_task", {"id": tid, "status": "todo"}))
+        self.assertTrue(out.startswith("⚠️"), out)
+        self.assertEqual(self.statuses()[tid], "backlog")
+
+    def test_elf_token_may_comment_task(self):
+        tid = self.seed()
+        out = self.text(self.tool(ELF, "comment_task", {"id": tid, "text": "note"}))
+        self.assertTrue(out.startswith("✅"), out)
+        self.assertIn("note", self.tm.store.get_task(tid)["plan"])
+
+    def test_elf_token_may_edit_task_domains(self):
+        tid = self.seed()
+        out = self.text(self.tool(ELF, "edit_task", {"id": tid, "domains": "to-agent dev"}))
+        self.assertTrue(out.startswith("✅"), out)
+        self.assertEqual(self.tm.store.get_task(tid)["domains"], ["to-agent", "dev"])
+
 
 class ElfDeniedTests(TokenCase):
     def test_elf_token_cannot_call_write_tools(self):
         tid = self.seed()
         before = self.statuses()
         calls = [
-            ("move_task", {"id": tid, "status": "in_progress"}),
             ("edit_task", {"id": tid, "text": "changed"}),
             ("add_task", {"text": "new", "title": "new"}),
             ("delete_task", {"id": tid}),
+            ("set_priority", {"id": tid, "priority": "high"}),
+            ("set_deadline", {"id": tid, "deadline": "2026-12-01"}),
         ]
         for name, args in calls:
             with self.subTest(tool=name):
                 self.assertEqual(self.tool(ELF, name, args).status_code, 403)
         self.assertEqual(self.statuses(), before)
         self.assertEqual(self.tm.store.get_task(tid)["text"], "Fixture task")
+
+    def test_elf_token_edit_task_beyond_id_and_domains_is_forbidden(self):
+        tid = self.seed()
+        calls = [
+            {"id": tid, "status": "in_progress"},
+            {"id": tid, "text": "changed"},
+            {"id": tid, "plan": "# new plan"},
+            {"id": tid, "domains": "dev", "title": "changed"},
+            {"id": tid, "domains": "dev", "priority": ""},
+        ]
+        for args in calls:
+            with self.subTest(args=sorted(args)):
+                self.assertEqual(self.tool(ELF, "edit_task", args).status_code, 403)
+        task = self.tm.store.get_task(tid)
+        self.assertEqual((task["status"], task["text"], task["domains"], task.get("plan")),
+                         ("todo", "Fixture task", ["to-agent"], None))
 
     def test_elf_token_cannot_call_project_tools(self):
         for name, args in (("create_project", {"slug": "demo", "name": "Demo"}), ("list_projects", {})):
