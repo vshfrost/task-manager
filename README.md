@@ -83,7 +83,7 @@ Bearer-мідлварь вимагає токен лише на MCP-шляху `
 ```
 - Статуси (порядок колонок): `[ ]` backlog · `[>]` to do · `[b]` blockers · `[/]` in progress · `[r]` in review · `[t]` testing · `[x]` done
 - Переходи (стор, для `move_task`, `edit_task` і дашборда): у to do — лише з backlog, testing,
-  in progress, in review або blockers; у blockers — лише з backlog, to do або testing; у in progress —
+  in progress, in review або blockers; у blockers — лише з backlog, to do, in progress або testing; у in progress —
   лише з to do; у in review — лише з in progress; у testing — лише з in progress, in review або
   blockers; у backlog і done — звідки завгодно. Нові задачі завжди створюються в backlog.
   Виняток: **backlog → to do — лише з дашборда** (веб-API); через MCP (`move_task` і зміна статусу в
