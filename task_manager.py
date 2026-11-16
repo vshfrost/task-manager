@@ -335,6 +335,28 @@ def _fmt_rec(r: dict) -> str:
     return "\n".join(lines)
 
 
+def _json_task(t: dict) -> dict:
+    """Задача для format=json: ті самі поля, що в текстовому виводі; project = слаг або 'global'."""
+    project = t["file"].replace("projects/", "").replace(".md", "") if t["file"] != "tasks.md" else "global"
+    return {
+        "id": t["id"], "title": t.get("title") or t["text"], "text": t["text"], "status": t["status"],
+        "priority": t["priority"], "deadline": t["deadline"], "energy": t["energy"],
+        "domains": t["domains"], "project": project, "links": t["links"],
+    }
+
+
+def _json_out(data: dict) -> str:
+    return json.dumps(data, ensure_ascii=False)
+
+
+def _json_format(fmt: str) -> bool | str:
+    """format тулів читання: '' → False (текст), 'json' → True; решта — текст помилки."""
+    fmt = (fmt or "").strip()
+    if fmt in ("", "json"):
+        return fmt == "json"
+    return f"Невідомий формат '{fmt}'. Дозволено: json (або порожньо — текст)"
+
+
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False), structured_output=False)
 def list_tasks(
     status: str = "", project: str = "", priority: str = "", domain: str = "",
@@ -345,7 +367,12 @@ def list_tasks(
     Фільтри опційні: status = backlog|todo|blockers|in_progress|in_review|testing|done; project = слаг проєкту або 'global';
     priority = asap|high|low; domain = тег без '#'; query = підрядок у заголовку чи тексті.
     status=todo — у ручному порядку колонки To Do (зверху те, що брати першим), не за пріоритетом.
-    limit — скільки задач показати (за замовч. 50). Повний текст і links — get_task(id)."""
+    limit — скільки задач показати (за замовч. 50). Повний текст і links — get_task(id).
+    format="json" — замість тексту JSON-рядок {"tasks": [{id, title, text, status, priority, deadline,
+    energy, domains, project, links}], "more": N, "hidden_done": N}; помилка — {"error": "..."}."""
+    as_json = _json_format(format)
+    if isinstance(as_json, str):
+        return _json_out({"error": as_json})
     try:
         tasks = store.list_tasks(
             status=_none(status),
@@ -355,11 +382,17 @@ def list_tasks(
             query=_none(query),
         )
     except PlannerError as e:
-        return f"⚠️ {e}"
+        return _json_out({"error": str(e)}) if as_json else f"⚠️ {e}"
     hidden = 0
     if not _none(status):
         hidden = sum(1 for t in tasks if t["status"] == "done")
         tasks = [t for t in tasks if t["status"] != "done"]
+    if as_json:
+        cap = max(1, min(int(limit or 50), 500))
+        return _json_out({
+            "tasks": [_json_task(t) for t in tasks[:cap]],
+            "more": max(0, len(tasks) - cap), "hidden_done": hidden,
+        })
     notes = []
     if hidden:
         notes.append(f"(+{hidden} done приховано — `status=done`)")
@@ -375,11 +408,18 @@ def list_tasks(
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False), structured_output=False)
 def get_task(id: str, format: str = "") -> str:
-    """Одна задача повністю: текст, пріоритет, дедлайн, energy, domains, проєкт, links, plan."""
+    """Одна задача повністю: текст, пріоритет, дедлайн, energy, domains, проєкт, links, plan.
+    format="json" — замість тексту JSON-рядок з полями задачі та "plan" (null, якщо плану нема);
+    помилка — {"error": "..."}."""
+    as_json = _json_format(format)
+    if isinstance(as_json, str):
+        return _json_out({"error": as_json})
     try:
         t = store.get_task(id.strip())
     except PlannerError as e:
-        return f"⚠️ {e}"
+        return _json_out({"error": str(e)}) if as_json else f"⚠️ {e}"
+    if as_json:
+        return _json_out({**_json_task(t), "plan": t.get("plan") or None})
     out = _fmt(t)
     if t["links"]:
         out += "\n🔗 " + ", ".join(t["links"])
