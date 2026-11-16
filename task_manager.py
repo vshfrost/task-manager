@@ -485,6 +485,16 @@ def set_deadline(id: str, deadline: str) -> str:
     return "✅ Оновлено: " + _fmt_short(t)
 
 
+@mcp.tool(annotations=_WRITE, structured_output=False)
+def comment_task(id: str, text: str) -> str:
+    """Додати коментар до задачі (заглушка)."""
+    try:
+        t = store.comment_task(id.strip(), text)
+    except PlannerError as e:
+        return f"⚠️ {e}"
+    return "✅ Коментар додано: " + _fmt_short(t)
+
+
 @mcp.tool(annotations=_DESTRUCTIVE, structured_output=False)
 def edit_task(
     id: str,

@@ -965,6 +965,10 @@ class PlannerStore:
             )
             return _with_plan(task.to_dict(), new_plan)
 
+    def comment_task(self, task_id: str, text: str) -> dict:
+        """Заглушка (червоні тести): нічого не пише."""
+        return self.get_task(task_id)
+
     def audit(self, week: str, prs: list[str]) -> tuple[dict, bool]:
         """Задача-нагадування «Аудит Elf тижня <week>» у backlog (проєкт elf, тег to-admin, у плані
         список PR). Ідемпотентно за заголовком (будь-який статус): (задача, створена_чи_ні)."""
