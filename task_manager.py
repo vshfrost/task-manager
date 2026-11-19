@@ -1,13 +1,13 @@
 """
-task-manager — MCP-сервер керування задачами над доменом `~/AI/planner/`.
+task-manager — MCP-сервер керування задачами над markdown-planner (корінь — `TASKS_PLANNER_ROOT`).
 ========================================================================
 
 Тули: list_tasks · get_task · board · add_task · move_task (правила переходів + WIP-гард) · set_priority ·
 set_deadline · delete_task. Джерело правди — markdown-файли planner.
 
-Транспорти (патерн brain-access):
-  stdio (за замовч.)              — локальний Claude Code на Mac / розробка
-  --http  / TASKS_TRANSPORT=http  — HTTP+bearer, :8792, лише tailnet (Mac)
+Транспорти:
+  stdio (за замовч.)              — локальний клієнт / розробка
+  --http  / TASKS_TRANSPORT=http  — HTTP+bearer, :8792, лише tailnet
   --oauth / TASKS_TRANSPORT=oauth — HTTP+OAuth, :8793, публічно за Caddy/Funnel
                                     (Claude-конектор на телефоні/вебі + ChatGPT app)
 
@@ -35,7 +35,7 @@ from mcp.types import ToolAnnotations
 from planner_history import as_client
 from planner_store import ELF_MAX_FAILURES, MAX_IN_PROGRESS, UNSET, PlannerError, PlannerStore
 
-# Людяний шлях MCP-ендпоінта (Caddy роутить сюди), як /brain і /media.
+# Людяний шлях MCP-ендпоінта (Caddy роутить сюди).
 TASKS_HTTP_PATH = os.environ.get("TASKS_HTTP_PATH", "/tasks")
 
 # Інструкції будь-якому клієнту (телефон/ПК), що вмикає цей конектор: лише про роботу
@@ -874,7 +874,7 @@ def run_http() -> None:
     async def auth(request, call_next):
         # Bearer вимагаємо лише на MCP-ендпоінті. Дашборд (/task-manager, /api/*) браузер відкриває
         # без заголовків — його захищає мережа: цей інстанс доступний тільки з tailnet
-        # (перевірено: з домашньої LAN порт не відкривається). Тому інстанс НЕ МОЖНА
+        # Тому інстанс НЕ МОЖНА
         # виставляти за Funnel — там ці маршрути стали б публічними.
         path = request.url.path
         on_mcp_path = path == TASKS_HTTP_PATH or path.startswith(TASKS_HTTP_PATH + "/")

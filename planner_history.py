@@ -7,7 +7,7 @@ planner_history — журнал змін задач (append-only JSONL) + де�
 з текстом задачі: LLM може тихо переписати формулювання, і без журналу це не спіймати.
 
 Розкладка (всередині `planner/`, бо це єдиний writable-корінь сервісу — отже само
-потрапляє в restic-бекап):
+потрапляє в бекап):
     planner/.history/YYYY-MM.jsonl   — по файлу на місяць, append-only, нічого не чистимо
     planner/.history/.state.json     — sha256 керованих файлів (для детекту ручних правок)
 
@@ -29,7 +29,7 @@ planner_history — журнал змін задач (append-only JSONL) + де�
 
 Це різні осі, і плутати їх не варто: `client` каже про пристрій/транспорт, `user` — про
 людину. Сьогодні `user` завжди `vlad` (сервіс однокористувацький, `tasks_oauth.SUBJECT`),
-але поле пишемо вже зараз: коли зʼявиться другий пароль (як другий користувач у torrserver-agent),
+але поле пишемо вже зараз: коли зʼявиться другий пароль,
 старі записи лишаться коректними, а нові самі почнуть розрізняти людей — переписувати
 журнал заднім числом не доведеться.
 """
@@ -104,8 +104,7 @@ DEFAULT_USER = os.environ.get("TASKS_DEFAULT_USER", "vlad").strip() or "vlad"
 
 
 def current_user(default: str = "") -> str:
-    """Ім'я юзера з OAuth access-token.subject. У stdio/bearer токена нема → default.
-    Патерн узято з torrserver-agent (`_current_user`), де він уже обкатаний на двох людях."""
+    """Ім'я юзера з OAuth access-token.subject. У stdio/bearer токена нема → default."""
     try:
         from mcp.server.auth.middleware.auth_context import get_access_token
 

@@ -14,8 +14,8 @@ migrate_tags — міграція тегів (#домен) на англійсь
 Зміни пишуться в `.history` (op `edit`, tool `migrate_tags`), як інші правки стору.
 Рядки без змін не чіпаються. Повторний запуск безпечний.
 
-    uv run python scripts/migrate_tags.py /srv/planner --map mapping.json            # dry-run
-    uv run python scripts/migrate_tags.py /srv/planner --map mapping.json --apply
+    uv run python scripts/migrate_tags.py /path/to/planner --map mapping.json            # dry-run
+    uv run python scripts/migrate_tags.py /path/to/planner --map mapping.json --apply
     # корінь planner: аргумент, інакше TASKS_PLANNER_ROOT, інакше ~/AI/planner
     # mapping.json: {"розробка": "dev", "побут": "home"}  (теги без '#')
 """

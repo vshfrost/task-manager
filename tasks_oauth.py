@@ -1,7 +1,6 @@
 """
 OAuth 2.1 authorization server для task-manager MCP (single-user).
 ==================================================================
-Клон патерну brain-access/brain_oauth.py (той самий SDK-інтерфейс і hardening).
 Реалізує інтерфейс OAuthAuthorizationServerProvider з MCP SDK 2.0.
 Особливості:
   - Dynamic Client Registration (конектор Claude реєструється сам).
@@ -11,7 +10,7 @@ OAuth 2.1 authorization server для task-manager MCP (single-user).
   - Токени привʼязані до resource (RFC 8707) і scope рівно `tasks`; ResourceGuard на /token;
     прострочені/legacy-токени вичищаються на старті. Клієнти: Claude-конектор і ChatGPT app.
 
-Захист: єдиний «юзер» — Влад. Пароль гейтить видачу коду навіть на публічному Funnel.
+Захист: єдиний «юзер» — власник. Пароль гейтить видачу коду навіть на публічному Funnel.
 """
 from __future__ import annotations
 
