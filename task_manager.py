@@ -873,9 +873,8 @@ def run_http() -> None:
 
     async def auth(request, call_next):
         # Bearer вимагаємо лише на MCP-ендпоінті. Дашборд (/task-manager, /api/*) браузер відкриває
-        # без заголовків — його захищає мережа: цей інстанс доступний тільки з tailnet
-        # Тому інстанс НЕ МОЖНА
-        # виставляти за Funnel — там ці маршрути стали б публічними.
+        # без заголовків — його захищає мережа: цей інстанс доступний тільки з tailnet.
+        # Тому інстанс НЕ МОЖНА виставляти за Funnel — там ці маршрути стали б публічними.
         path = request.url.path
         on_mcp_path = path == TASKS_HTTP_PATH or path.startswith(TASKS_HTTP_PATH + "/")
         authz = request.headers.get("authorization", "")

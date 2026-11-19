@@ -11,7 +11,7 @@ migrate_backlog — одноразова міграція журналу: ста
 ЗАПУСКАТИ ОДИН РАЗ ДО деплою колонки `todo` (07bc93): після неї `todo` вже значить інше.
 Повторний запуск безпечний (нічого не змінює).
 
-    uv run python scripts/migrate_backlog.py /path/to/planner     # корінь planner = аргумент
+    uv run python scripts/migrate_backlog.py /path/to/planner # корінь planner = аргумент
     uv run python scripts/migrate_backlog.py                  # інакше TASKS_PLANNER_ROOT, інакше ~/AI/planner
 """
 from __future__ import annotations
