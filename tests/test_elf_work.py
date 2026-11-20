@@ -263,7 +263,7 @@ class ReleaseTests(ElfCase):
         tid = self.claimed_task()
         self.seed_failures(tid, 2)
         res = self.s.release(tid, "знову впало", "claude")
-        self.assertEqual(self.failures(tid), 0)  # блок скидає лічильник (Влад 2026-11-14)
+        self.assertEqual(self.failures(tid), 0)  # блок скидає лічильник (рішення власника)
         domains = self.get(tid)["domains"]
         self.assertIn("blocked", domains)
         self.assertNotIn("to-agent", domains)

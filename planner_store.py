@@ -1,5 +1,5 @@
 """
-planner_store — читання/запис доменних файлів задач у `~/AI/planner/`.
+planner_store — читання/запис доменних файлів задач у корені planner (`TASKS_PLANNER_ROOT`).
 =====================================================================
 
 Сховище над markdown-файлами planner (джерело правди). Дає операції для MCP-тулів:
@@ -944,7 +944,7 @@ class PlannerStore:
             return self._elf_fail(store, task, "return", agent, comment, tool="elf_return")
 
     def escalate(self, task_id: str, reason: str, agent: str) -> dict:
-        """Рев'юер віддає задачу Владу: лишається в in_review, +тег `to-admin` (review_next її
+        """Рев'юер віддає задачу власнику: лишається в in_review, +тег `to-admin` (review_next її
         пропускає), причина — у `## Elf` плану; лічильник невдач і результат CI не чіпаємо."""
         _check_agent(agent)
         reason = _elf_reason(reason)

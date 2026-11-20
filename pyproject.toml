@@ -1,10 +1,10 @@
 [project]
 name = "task-manager"
 version = "0.1.0"
-description = "MCP-сервер керування задачами над доменом ~/AI/planner (канбан/календар; джерело — markdown)"
+description = "MCP-сервер керування задачами над markdown-planner (канбан/календар; джерело — markdown)"
 requires-python = ">=3.10"
 dependencies = [
-    "mcp[cli]>=2.1",   # 2.x: FastMCP → MCPServer (код мігровано 2026-09-06)
+    "mcp[cli]>=2.1",   # 2.x: FastMCP → MCPServer
     "python-dotenv>=1.0",
 ]
 
