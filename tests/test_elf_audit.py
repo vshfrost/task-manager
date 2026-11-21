@@ -110,8 +110,8 @@ class AuditTokenTests(TokenCase):
         self.assertTrue(out.startswith("✅"), out)
         self.assertEqual([t["title"] for t in self.tm.store.list_tasks()], [TITLE])
 
-    def test_elf_token_still_cannot_call_add_task(self):
-        resp = self.tool(ELF, "add_task", {"text": "new", "title": "new"})
+    def test_elf_token_cannot_call_add_task_with_priority(self):
+        resp = self.tool(ELF, "add_task", {"text": "new", "title": "new", "priority": "high"})
         self.assertEqual(resp.status_code, 403)
         self.assertEqual(self.tm.store.list_tasks(), [])
 

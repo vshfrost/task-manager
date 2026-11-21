@@ -817,11 +817,13 @@ def _transport_security(port: int):
 
 
 # Токен `elf` приймаємо лише з loopback і лише для цих тулів (+ усі `elf_*`).
-# edit_task — лише з аргументами з _ELF_EDIT_ARGS (теги задачі), решта полів → 403.
+# edit_task — лише з аргументами з _ELF_EDIT_ARGS (теги задачі), add_task — лише з _ELF_ADD_ARGS,
+# решта полів → 403.
 _ELF_LOOPBACK = frozenset({"127.0.0.1", "::1"})
 _ELF_READ_TOOLS = frozenset({"list_tasks", "get_task", "board"})
 _ELF_WRITE_TOOLS = frozenset({"move_task", "comment_task"})
 _ELF_EDIT_ARGS = frozenset({"id", "domains"})
+_ELF_ADD_ARGS = frozenset({"text", "title", "project", "plan"})
 
 
 def _elf_tool_allowed(name, args=None) -> bool:
@@ -829,6 +831,8 @@ def _elf_tool_allowed(name, args=None) -> bool:
         return False
     if name == "edit_task":
         return isinstance(args, dict) and set(args) <= _ELF_EDIT_ARGS
+    if name == "add_task":
+        return isinstance(args, dict) and set(args) <= _ELF_ADD_ARGS
     return name.startswith("elf_") or name in _ELF_READ_TOOLS or name in _ELF_WRITE_TOOLS
 
 
