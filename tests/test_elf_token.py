@@ -135,7 +135,8 @@ class ElfAllowedTests(TokenCase):
         args = {"text": "new", "title": "new", "project": "demo", "plan": "# plan"}
         out = self.text(self.tool(ELF, "add_task", args))
         self.assertTrue(out.startswith("✅"), out)
-        (task,) = self.tm.store.list_tasks()
+        (listed,) = self.tm.store.list_tasks()
+        task = self.tm.store.get_task(listed["id"])
         self.assertEqual((task["status"], task["file"], task["plan"]), ("backlog", "projects/demo.md", "# plan"))
 
     def test_elf_token_may_add_task_with_only_text_and_title(self):
